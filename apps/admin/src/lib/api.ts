@@ -26,7 +26,17 @@ export async function api<T>(
       },
     });
     if (response.status === 204) return undefined as T;
-    const body = await response.json();
+    const invalidResponse = () =>
+      new ApiError(
+        "The admin API returned an invalid response. Check that ALONG_API_URL points to the Express API service and that it is running.",
+        502,
+      );
+    if (!response.headers.get("content-type")?.includes("application/json"))
+      throw invalidResponse();
+    const body = await response.json().catch(() => {
+      throw invalidResponse();
+    });
+    if (!body || typeof body !== "object") throw invalidResponse();
     if (!response.ok)
       throw new ApiError(
         body.error?.issues?.[0]?.message ??

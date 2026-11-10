@@ -31,6 +31,20 @@ async function proxy(
         signal: AbortSignal.timeout(15000),
       },
     );
+    if (
+      upstream.status !== 204 &&
+      !upstream.headers.get("content-type")?.includes("application/json")
+    )
+      return NextResponse.json(
+        {
+          error: {
+            code: "API_INVALID_RESPONSE",
+            message:
+              "The backend returned an unexpected response. Check that ALONG_API_URL points to the Express API service, not the admin dashboard.",
+          },
+        },
+        { status: 502, headers: { "Cache-Control": "no-store" } },
+      );
     const responseHeaders = new Headers({ "Cache-Control": "no-store" });
     for (const name of ["content-type", "set-cookie", "x-request-id"]) {
       const value = upstream.headers.get(name);
