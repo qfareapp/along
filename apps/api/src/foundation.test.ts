@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
 import { createApp } from "./app.js";
+import { config } from "./config.js";
 import { isAdult, activityInput, registration } from "./validation.js";
 import { activitySchema, profileSchema, userSchema } from "./models.js";
 
@@ -15,6 +16,20 @@ test("health works independently of MongoDB; database routes fail closed", async
   assert.equal(activities.status, 503);
   assert.equal(activities.body.error.code, "DATABASE_UNAVAILABLE");
 });
+test("proxy trust is limited to configured hops and disabled for direct local access", () => {
+  const previous = config.TRUST_PROXY_HOPS;
+  try {
+    config.TRUST_PROXY_HOPS = 1;
+    const trust = createApp().get("trust proxy fn");
+    assert.equal(trust("203.0.113.25", 0), true);
+    assert.equal(trust("198.51.100.1", 1), false);
+    config.TRUST_PROXY_HOPS = 0;
+    assert.equal(createApp().get("trust proxy fn")("203.0.113.25", 0), false);
+  } finally {
+    config.TRUST_PROXY_HOPS = previous;
+  }
+});
+
 test("HTTP security headers and consistent unknown-route errors", async () => {
   const res = await request(createApp()).get("/missing");
   assert.equal(res.status, 404);

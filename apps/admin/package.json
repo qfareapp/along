@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev --hostname localhost",
     "build": "next build",
-    "start": "next start --hostname localhost",
+    "start": "next start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

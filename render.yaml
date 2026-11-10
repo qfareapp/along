@@ -1,0 +1,73 @@
+# Keep the repository root available: both apps import shared packages/ files.
+services:
+  - type: web
+    name: along-api
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: npm --prefix apps/api ci --include=dev && npm --prefix apps/api run build
+    startCommand: npm --prefix apps/api start
+    healthCheckPath: /ready
+    buildFilter:
+      paths:
+        - apps/api/**
+        - packages/**
+        - render.yaml
+        - .node-version
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_AUTH_MODE
+        value: mfa
+      # Use the existing stable 64-character hex key if reusing an admin database.
+      - key: ADMIN_ENCRYPTION_KEY
+        sync: false
+      # Set this to the admin service's actual public HTTPS origin.
+      - key: ADMIN_ORIGIN
+        sync: false
+      - key: CORS_ORIGINS
+        value: http://localhost:8081
+      - key: EMAIL_VERIFICATION_REQUIRED
+        value: "false"
+      # Render's ephemeral filesystem must not hold member uploads.
+      - key: PHOTO_STORAGE
+        value: cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  - type: web
+    name: along-admin
+    runtime: node
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: commit
+    buildCommand: npm --prefix apps/admin ci --include=dev && npm --prefix apps/admin run build
+    startCommand: npm --prefix apps/admin start
+    healthCheckPath: /login
+    buildFilter:
+      paths:
+        - apps/admin/**
+        - packages/**
+        - render.yaml
+        - .node-version
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALONG_API_URL
+        fromService:
+          type: web
+          name: along-api
+          envVarKey: RENDER_EXTERNAL_URL

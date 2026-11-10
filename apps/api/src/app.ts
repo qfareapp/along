@@ -60,6 +60,8 @@ const validId = (value: unknown) => {
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
+  if (config.TRUST_PROXY_HOPS > 0)
+    app.set("trust proxy", config.TRUST_PROXY_HOPS);
   app.use(helmet());
   app.use(
     cors({

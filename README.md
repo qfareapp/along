@@ -2,6 +2,10 @@
 
 **Same plans. Better together.**
 
+[![Deploy API and admin to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fqfareapp%2Falong)
+
+The Render Blueprint deploys the API and admin dashboard as separate services. See [Render setup and required environment values](docs/deployment.md#render-api-and-admin-dashboard).
+
 An Expo React Native application built from the supplied Along UI showcase: deep teal, coral, ivory, peach, rounded activity cards, large discovery imagery and five-tab navigation. The exact illustration and photo regions were extracted from the supplied reference for the local preview. Source images are small, so original high-resolution assets will be needed for production-quality imagery. The logo is a native text/icon reconstruction, not the original logo font.
 
 ## Activity-first onboarding

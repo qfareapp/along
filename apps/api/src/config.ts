@@ -7,6 +7,7 @@ const schema = z.object({
     .enum(["development", "test", "production"])
     .default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   MONGODB_URI: z.string().optional(),
   PHOTO_STORAGE: z.enum(["auto", "mongodb", "cloudinary"]).default("auto"),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
