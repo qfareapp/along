@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname localhost",
-    "build": "next build",
-    "start": "next start --hostname 0.0.0.0",
+    "build": "node scripts/next-production.mjs build",
+    "start": "node scripts/next-production.mjs start --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

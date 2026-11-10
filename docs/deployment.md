@@ -28,6 +28,8 @@ The Blueprint keeps email OTP verification disabled (`EMAIL_VERIFICATION_REQUIRE
 
 After deployment, verify the API's `/health` and `/ready`, then open the admin URL and sign in. Point the mobile build's `EXPO_PUBLIC_API_URL` to `<actual-api-url>/api/v1` and keep `EXPO_PUBLIC_DEMO_MODE=false`; restart Expo or rebuild the mobile app to apply the URL. Free services can sleep while idle, so an initial request may wait for a cold start. Member uploads use authenticated Cloudinary because Render's local filesystem is ephemeral.
 
+If the admin build reports `<head>` key warnings followed by a `useContext` error while prerendering `/_global-error`, check the Render service's `NODE_ENV`: it must be exactly `production`. The admin build/start scripts explicitly enforce this before loading Next.js and its workers. The same failure was reproduced with an inherited `NODE_ENV=development`. Keep the app-specific build command above, then use Render's **Clear build cache & deploy** after correcting an earlier deployment. Do not change React versions or disable prerendering merely to hide this environment mismatch.
+
 References: [Render Blueprint fields](https://render.com/docs/blueprint-spec), [monorepo roots](https://render.com/docs/monorepo-support), [deploy button](https://render.com/docs/deploy-to-render), [free service limits](https://render.com/docs/free).
 
 ## Deployment notes
