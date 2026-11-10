@@ -1,5 +1,19 @@
 # Deployment and remaining verification
 
+## Vercel admin with Render API
+
+Import `qfareapp/along` at [Vercel New Project](https://vercel.com/new), select branch `main`, and set **Root Directory** to `apps/admin`. Select **Next.js** as the framework and Node.js **22.x**. Enable **Include source files outside of the Root Directory in the Build Step** under the root-directory settings: the admin imports `packages/shared-types` and its Turbopack root is the repository root.
+
+The admin's `vercel.json` sets the install command to `npm ci --include=dev` and the build command to `npm run build`. Keep the output directory at its Next.js default. Vercel manages serving the application; no start command is required.
+
+Add `ALONG_API_URL` to the Vercel project's **Production** environment, using the Render API's public HTTPS origin, for example `https://your-api.onrender.com` (replace with the actual URL; no `/api/v1` suffix or trailing slash). The admin proxy adds the API path itself. Keep this variable server-side. API database, JWT, MFA encryption and Cloudinary credentials remain on Render. Leave Vercel's `NODE_ENV` at its production default.
+
+Deploy, then copy the stable production Vercel domain (or your custom admin domain). On the Render **API** service, set `ADMIN_ORIGIN` to this exact HTTPS origin, for example `https://your-admin.vercel.app`, with no path or trailing slash, and redeploy the API. The API validates this origin for login and authenticated writes. Its existing CORS setup already includes `ADMIN_ORIGIN`. Changing to Vercel means this origin replaces the former Render admin origin.
+
+Open `/login` on the stable production domain and sign in with the existing provisioned MFA admin. Preview deployment domains differ from the production origin and will not pass the API's origin check; use a separate staging API if authenticated previews are needed. If the API is on Render's Free plan, its first request after sleeping may exceed the admin proxy's 15-second timeout; wait for `/ready` to respond and retry login.
+
+References: [Vercel monorepo settings](https://vercel.com/docs/monorepos/monorepo-faq), [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs), [Vercel environment variables](https://vercel.com/docs/environment-variables).
+
 ## Render API and admin dashboard
 
 The root `render.yaml` defines `along-api` and `along-admin` on Render's Free plan in Singapore, tracking GitHub branch `main`. Both use Node 22. The native mobile app continues to run in Expo or a mobile build; this Blueprint does not publish a browser app.
