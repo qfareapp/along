@@ -1,0 +1,19 @@
+{
+  "cli": {
+    "appVersionSource": "local"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://along-5tiq.onrender.com/api/v1",
+        "EXPO_PUBLIC_DEMO_MODE": "false",
+        "EXPO_PUBLIC_SCREEN_CAPTURE_PROTECTION": "true"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  }
+}
