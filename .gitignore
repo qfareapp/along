@@ -1,0 +1,45 @@
+node_modules/
+# Local state and generated builds
+.tmp/
+.next/
+dist-*/
+web-build/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+# Credentials and machine-specific configuration
+.env*
+!.env.example
+!.env.*.example
+.aws/
+.codex/
+.claude/
+*.pem
+*.key
+*.p8
+*.p12
+*.jks
+*.mobileprovision
+# Generated browser QA captures
+docs/screenshots/
+docs/*screenshots/
+apps/mobile/dist-onboarding-qa/
+apps/mobile/dist-onboarding-native-qa/
+apps/mobile/dist-demo-qa/
+apps/mobile/dist-onboarding-native-qa/
+.expo/
+dist/
+coverage/
+.env
+.env.local
+*.log
+*npm-cache/
+.npm-cache/
+mongodb-binaries/
+.cache/
+.social-media/
+apps/api/.social-media/
+.chat-media/
+apps/api/.chat-media/
+apps/mobile/dist-social-qa/
+apps/mobile/dist-social-native-qa/

@@ -1,0 +1,32 @@
+{
+  "name": "along",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "mobile": "npm --prefix apps/mobile start",
+    "web": "npm --prefix apps/mobile run web",
+    "api": "npm --prefix apps/api run dev",
+    "api:local": "npm --prefix apps/api run dev:local",
+    "api:local:admin": "npm --prefix apps/api run dev:local:admin",
+    "admin": "npm --prefix apps/admin run dev",
+    "admin:bootstrap": "npm --prefix apps/api run admin:bootstrap",
+    "admin:build": "npm --prefix apps/admin run build",
+    "preview": "node tools/preview.mjs",
+    "qa": "node tools/qa.mjs",
+    "qa:mobile": "node tools/mobile-qa.mjs",
+    "build": "npm --prefix apps/mobile run export && npm --prefix apps/api run build && npm --prefix apps/admin run build",
+    "typecheck": "npm --prefix apps/mobile run typecheck && npm --prefix apps/api run typecheck && npm --prefix apps/admin run typecheck",
+    "qa:admin": "npm --prefix apps/api run qa:admin",
+    "qa:admin:simple": "npm --prefix apps/api run qa:admin:simple",
+    "qa:onboarding": "node tools/onboarding-qa.mjs",
+    "qa:plans": "node tools/plans-qa.mjs",
+    "qa:tablet": "node tools/plans-qa.mjs --tablet",
+    "qa:social": "node tools/social-qa.mjs",
+    "test": "npm --prefix apps/api test",
+    "test:uploads": "node apps/api/node_modules/tsx/dist/cli.mjs --test tools/native-upload.test.ts"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1",
+    "prettier": "^3.9.10"
+  }
+}

@@ -1,0 +1,112 @@
+@import "tailwindcss";
+@theme inline {
+  --color-background: #fff8f2;
+  --color-foreground: #27343b;
+  --color-primary: #174f54;
+  --color-primary-foreground: #fff8f2;
+  --color-secondary: #f4e6da;
+  --color-muted: #f6eee7;
+  --color-muted-foreground: #7b8383;
+  --color-border: #eadfd5;
+  --color-input: #e6d9cd;
+  --color-ring: #f47768;
+  --color-destructive: #bf4f48;
+  --color-coral: #f47768;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  color: var(--color-foreground);
+  background: var(--color-background);
+  font-family: Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+a,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+button {
+  cursor: pointer;
+}
+input,
+select,
+textarea {
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 3px #f4776828;
+  border-color: #f47768;
+}
+.field {
+  width: 100%;
+  border: 1px solid #e6d9cd;
+  background: #fffdfb;
+  border-radius: 12px;
+  padding: 11px 13px;
+  font-size: 14px;
+}
+.panel {
+  border: 1px solid #ede3da;
+  border-radius: 20px;
+  background: #fffdfb;
+  box-shadow: 0 3px 16px #5a403503;
+}
+.page-title {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -1px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #84908f;
+}
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  text-align: left;
+}
+th {
+  color: #88908f;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 16px 20px;
+  background: #fcf8f4;
+  font-weight: 600;
+  white-space: nowrap;
+}
+td {
+  padding: 17px 20px;
+  border-top: 1px solid #f0e8e1;
+  vertical-align: middle;
+}
+tbody tr:hover {
+  background: #fdf7f0;
+}
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d9d5cd;
+  border-radius: 6px;
+}
