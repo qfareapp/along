@@ -28,7 +28,7 @@ export default function Login() {
       api<{ mode: "mfa" | "env"; mfaRequired: boolean }>("/auth/config"),
     staleTime: 0,
   });
-  const mfaRequired = authConfig.data?.mfaRequired ?? true;
+  const mfaRequired = authConfig.data?.mfaRequired ?? false;
   const router = useRouter();
   const [error, setError] = useState("");
   const {

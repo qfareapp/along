@@ -143,3 +143,57 @@ test("environment recovery uses configuration rather than MFA recovery, and logo
     .expect(204);
   await agent.get("/api/v1/admin/auth/me").expect(401);
 });
+
+test("production email/password login needs no code and uses secure cookies and CSRF", async () => {
+  const previous = config.NODE_ENV;
+  config.NODE_ENV = "production";
+  try {
+    const login = await request(app)
+      .post("/api/v1/admin/auth/login")
+      .set("Origin", origin)
+      .send({ email: config.ADMIN_EMAIL, password: config.ADMIN_PASSWORD });
+    assert.equal(login.status, 200, JSON.stringify(login.body));
+    const cookie = login.headers["set-cookie"][0];
+    assert.match(cookie, /Secure/);
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Strict/);
+    const token = cookie.split(";")[0];
+    await request(app)
+      .get("/api/v1/admin/auth/me")
+      .set("Cookie", token)
+      .expect(200);
+    await request(app)
+      .post("/api/v1/admin/auth/logout")
+      .set({ Cookie: token, Origin: "https://other.example" })
+      .expect(403);
+    await request(app)
+      .post("/api/v1/admin/auth/logout")
+      .set({
+        Cookie: token,
+        Origin: origin,
+        "X-CSRF-Token": login.body.data.csrf,
+      })
+      .expect(204);
+  } finally {
+    config.NODE_ENV = previous;
+  }
+});
+
+test("email/password login locks an account after repeated incorrect passwords", async () => {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await request(app)
+      .post("/api/v1/admin/auth/login")
+      .set("Origin", origin)
+      .send({ email: config.ADMIN_EMAIL, password: "incorrect" })
+      .expect(401);
+  }
+  await request(app)
+    .post("/api/v1/admin/auth/login")
+    .set("Origin", origin)
+    .send({ email: config.ADMIN_EMAIL, password: config.ADMIN_PASSWORD })
+    .expect(401);
+  await User.updateOne(
+    { _id: adminId },
+    { $set: { failedAdminLogins: 0 }, $unset: { adminLockedUntil: 1 } },
+  );
+});

@@ -10,7 +10,7 @@ Add `ALONG_API_URL` to the Vercel project's **Production** environment, using th
 
 Deploy, then copy the stable production Vercel domain (or your custom admin domain). On the Render **API** service, set `ADMIN_ORIGIN` to this exact HTTPS origin, for example `https://your-admin.vercel.app`, with no path or trailing slash, and redeploy the API. The API validates this origin for login and authenticated writes. Its existing CORS setup already includes `ADMIN_ORIGIN`. Changing to Vercel means this origin replaces the former Render admin origin.
 
-Open `/login` on the stable production domain and sign in with the existing provisioned MFA admin. Preview deployment domains differ from the production origin and will not pass the API's origin check; use a separate staging API if authenticated previews are needed. If the API is on Render's Free plan, its first request after sleeping may exceed the admin proxy's 15-second timeout; wait for `/ready` to respond and retry login.
+On Render's API service, set `ADMIN_AUTH_MODE=env`, `ADMIN_EMAIL` and `ADMIN_PASSWORD` to your chosen private credentials. Open `/login` on the stable production domain and sign in with that email and password; no authenticator code or bootstrap is required. Preview deployment domains differ from the production origin and will not pass the API's origin check; use a separate staging API if authenticated previews are needed. If the API is on Render's Free plan, its first request after sleeping may exceed the admin proxy's 15-second timeout; wait for `/ready` to respond and retry login.
 
 References: [Vercel monorepo settings](https://vercel.com/docs/monorepos/monorepo-faq), [Next.js on Vercel](https://vercel.com/docs/frameworks/full-stack/nextjs), [Vercel environment variables](https://vercel.com/docs/environment-variables).
 
@@ -32,13 +32,14 @@ Configure these secrets on the **API service**, not in GitHub or the mobile app:
 | Variable | Value |
 | --- | --- |
 | `MONGODB_URI` | Durable MongoDB Atlas connection string, including the existing Along database name. Permit the API service's listed outbound IP ranges in Atlas Network Access. |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Your chosen administrator email and private password for email/password login (`ADMIN_AUTH_MODE=env`). The first successful login creates a dedicated admin if needed. |
 | `ADMIN_ENCRYPTION_KEY` | The existing stable 64-character hexadecimal key used to encrypt your admin MFA secrets. Preserve it when reusing an existing database. For a fresh database, generate it privately with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`. |
 | `ADMIN_ORIGIN` | The admin service's actual public HTTPS origin, with no path. Render can assign a suffix when a service name is already taken; update this value if the final URL differs. |
 | `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` | The existing Cloudinary account credentials for private profile, Moment and chat media. |
 
 Render generates `JWT_SECRET`. `ALONG_API_URL` on the admin service references the API service's generated HTTPS URL. `ADMIN_ORIGIN` is entered manually to avoid a circular service reference. The API already permits this admin origin in CORS. Add any additional browser origin to `CORS_ORIGINS` if needed. Native mobile requests do not need a browser origin.
 
-The Blueprint keeps email OTP verification disabled (`EMAIL_VERIFICATION_REQUIRED=false`), as requested. It sets production admin authentication to MFA; temporary local environment-password login is rejected in production by the existing API. Use an already provisioned MFA administrator, or follow [admin bootstrap](admin-setup.md) against the deployment database with the same encryption key. Do not run local fixture seeding against live member data.
+The Blueprint keeps email OTP verification disabled (`EMAIL_VERIFICATION_REQUIRED=false`), as requested. It sets production admin authentication to email/password (`ADMIN_AUTH_MODE=env`); configure `ADMIN_EMAIL` and `ADMIN_PASSWORD` on the API service. No authenticator code is required. Keep any existing MFA encryption key for accounts that may use optional MFA later. Do not run local fixture seeding against live member data.
 
 After deployment, verify the API's `/health` and `/ready`, then open the admin URL and sign in. Point the mobile build's `EXPO_PUBLIC_API_URL` to `<actual-api-url>/api/v1` and keep `EXPO_PUBLIC_DEMO_MODE=false`; restart Expo or rebuild the mobile app to apply the URL. Free services can sleep while idle, so an initial request may wait for a cold start. Member uploads use authenticated Cloudinary because Render's local filesystem is ephemeral.
 

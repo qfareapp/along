@@ -43,13 +43,9 @@ const schema = z.object({
 });
 export const config = schema.parse(process.env);
 if (config.ADMIN_AUTH_MODE === "env") {
-  if (config.NODE_ENV === "production")
-    throw new Error(
-      "Environment-only admin login is for local development. Use MFA mode in production.",
-    );
   if (!config.ADMIN_EMAIL || !config.ADMIN_PASSWORD)
     throw new Error(
-      "Set ADMIN_EMAIL and ADMIN_PASSWORD (6+ characters) in apps/api/.env.",
+      "Set ADMIN_EMAIL and ADMIN_PASSWORD (6+ characters) in the API environment.",
     );
   if (!config.JWT_SECRET)
     throw new Error("Set JWT_SECRET before enabling environment admin login.");

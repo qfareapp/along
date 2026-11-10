@@ -2,9 +2,9 @@
 
 The admin panel is a Next.js frontend for the **existing Along Express API and its single MongoDB connection**. It has no database client, separate business API or copy of mobile users. The small Next.js `/api/admin/*` proxy forwards requests and cookies to Express; all permissions and mutations are enforced there.
 
-## Current simple login in Windows CMD
+## Email and password login
 
-Temporary local email/password login is enabled in `apps/api/.env`:
+Email/password login is available locally and in production. Configure these values in `apps/api/.env` locally, or in the Render API service's Environment settings:
 
 ```dotenv
 ADMIN_AUTH_MODE=env
@@ -19,7 +19,7 @@ Run `npm run api` from `D:\Along` in one CMD window, then `npm run admin` in ano
 
 Changing credentials requires restarting the API and invalidates previously issued environment-login sessions. HTTP-only cookies, session expiry, CSRF, lockout, role checks and audit logs remain enabled. Recovery in this mode means changing the password in the backend file and restarting the API.
 
-This temporary mode is prohibited when `NODE_ENV=production`. To restore the original authenticator flow, set `ADMIN_AUTH_MODE=mfa`, restart the API, and use an MFA-provisioned admin account. Keep your original setup URI/recovery codes for that account.
+For production, keep `NODE_ENV=production`, `ADMIN_AUTH_MODE=env`, and set `ADMIN_ORIGIN` to the exact Vercel production origin. Keep the existing `MONGODB_URI` and `JWT_SECRET`. The first successful login creates the dedicated admin if needed; no bootstrap or authenticator code is required. Changing `ADMIN_PASSWORD` in Render and redeploying invalidates existing environment-login sessions. An existing MFA admin with the configured email can use the environment credentials after switching modes. Existing MFA sessions are invalidated. To opt into authenticator login again, set `ADMIN_AUTH_MODE=mfa` and use an MFA-provisioned account with its original encryption key.
 
 ## Optional temporary database with MFA
 

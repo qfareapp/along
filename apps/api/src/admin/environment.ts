@@ -34,7 +34,7 @@ export async function ensureEnvironmentAdmin() {
         action: "admin.environment_provisioned",
         targetType: "User",
         targetId: String(user._id),
-        reason: "Operator enabled temporary environment-based admin login.",
+        reason: "Operator enabled email and password admin login.",
       });
     } catch (error) {
       if ((error as { code?: number }).code !== 11000) throw error;
