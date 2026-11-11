@@ -14,6 +14,7 @@ export type MemberCard = {
   mutual?: boolean;
   conversationId?: string | null;
   likedAt?: string | null;
+  likedYou?: boolean;
   /** Both people fit each other's age and gender preferences. */
   mutualMatch?: boolean;
   relationshipIntent?: string | null;

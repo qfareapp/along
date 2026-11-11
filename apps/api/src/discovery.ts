@@ -32,11 +32,12 @@ function ageOf(birth: Date) {
   return age;
 }
 export async function compatibleProfiles(userId: string) {
-  const [viewer, user, ready, blocks] = await Promise.all([
+  const [viewer, user, ready, blocks, incoming] = await Promise.all([
     Profile.findOne({ user: userId }).lean(),
     User.findById(userId).select("+birthDate"),
     discoveryUserIds(),
     Block.find({ $or: [{ user: userId }, { target: userId }] }).lean(),
+    ProfileSwipe.find({ target: userId, action: "like" }).distinct("user"),
   ]);
   if (!viewer || !user?.birthDate)
     throw fail(403, "Complete your profile first.");
@@ -76,7 +77,8 @@ export async function compatibleProfiles(userId: string) {
       birthDate: { $gte: oldest, $lte: youngest },
     }).distinct("_id"),
   ]);
-  // Their preferences must always include the viewer: nobody is shown to people they excluded.
+  // An explicit like is consent to be seen and liked back by its recipient,
+  // even when the sender's saved preferences would exclude that recipient.
   const openToViewer = {
     "preferences.genders": viewer.gender,
     "preferences.minAge": { $lte: age },
@@ -84,8 +86,12 @@ export async function compatibleProfiles(userId: string) {
   };
   return {
     viewer,
+    incoming,
     /** Members who are open to the viewer. Used for viewing, liking and lists. */
-    filter: { user: { $in: everyone }, ...openToViewer },
+    filter: {
+      user: { $in: everyone },
+      $or: [openToViewer, { user: { $in: incoming } }],
+    },
     /** Members who also fit the viewer's own age and gender preferences. */
     mutualFilter: {
       user: { $in: inAgeRange },
@@ -149,7 +155,7 @@ export function discoveryRouter() {
         limit: z.coerce.number().int().min(1).max(30).default(20),
       })
       .parse(req.query);
-    const { viewer, filter, mutualFilter } = await compatibleProfiles(
+    const { viewer, filter, mutualFilter, incoming } = await compatibleProfiles(
       req.userId!,
     );
     const seen = await ProfileSwipe.find({ user: req.userId }).distinct(
@@ -162,7 +168,8 @@ export function discoveryRouter() {
         400,
         "Update your location in Dating Preferences to find nearby people.",
       );
-    // The selected radius applies to both mutual matches and fallback suggestions.
+    // Distance/city limits apply to suggestions. Explicit incoming likes remain
+    // reachable so a recipient can decide whether to like back.
     // When enabled, it replaces the city boundary so nearby members across cities appear.
     const city =
       radius != null && coordinates
@@ -178,35 +185,76 @@ export function discoveryRouter() {
     const byVibes = (a: { vibes: string[] }, b: { vibes: string[] }) =>
       b.vibes.filter((v) => vibes.has(v)).length -
       a.vibes.filter((v) => vibes.has(v)).length;
-    // Mutual preference matches first; once they run out, fill with members open to the viewer.
-    const mutual = await publicCards(
+    const incomingIds = new Set(incoming.map(String));
+    const incomingCards = await publicCards(
       await Profile.find({
-        ...mutualFilter,
-        user: { ...mutualFilter.user, $nin: seen },
-        ...city,
+        ...filter,
+        user: {
+          $in: filter.user.$in.filter((id) => incomingIds.has(String(id))),
+          $nin: seen,
+        },
       })
         .sort({ _id: -1 })
         .limit(q.limit),
     );
+    const incomingMutual = new Set(
+      (
+        await Profile.find({
+          ...mutualFilter,
+          user: {
+            $in: mutualFilter.user.$in.filter((id) =>
+              incomingIds.has(String(id)),
+            ),
+          },
+        }).distinct("user")
+      ).map(String),
+    );
+    const excluded = [...seen, ...incomingCards.map((card) => card.id)];
+    // Mutual preference matches first; once they run out, fill with members open to the viewer.
+    const mutual =
+      incomingCards.length === q.limit
+        ? []
+        : await publicCards(
+            await Profile.find({
+              ...mutualFilter,
+              user: { ...mutualFilter.user, $nin: excluded },
+              ...city,
+            })
+              .sort({ _id: -1 })
+              .limit(q.limit - incomingCards.length),
+          );
     const others =
-      mutual.length < q.limit
+      incomingCards.length + mutual.length < q.limit
         ? await publicCards(
             await Profile.find({
               ...filter,
               user: {
                 ...filter.user,
-                $nin: [...seen, ...mutual.map((c) => c.id)],
+                $nin: [...excluded, ...mutual.map((c) => c.id)],
               },
               ...city,
             })
               .sort({ _id: -1 })
-              .limit(q.limit - mutual.length),
+              .limit(q.limit - incomingCards.length - mutual.length),
           )
         : [];
     res.json({
       data: [
-        ...mutual.sort(byVibes).map((c) => ({ ...c, mutualMatch: true })),
-        ...others.sort(byVibes).map((c) => ({ ...c, mutualMatch: false })),
+        ...incomingCards.map((card) => ({
+          ...card,
+          likedYou: true,
+          mutualMatch: incomingMutual.has(card.id),
+        })),
+        ...mutual.sort(byVibes).map((c) => ({
+          ...c,
+          mutualMatch: true,
+          likedYou: incoming.some((id) => String(id) === c.id),
+        })),
+        ...others.sort(byVibes).map((c) => ({
+          ...c,
+          mutualMatch: false,
+          likedYou: incoming.some((id) => String(id) === c.id),
+        })),
       ],
     });
   });
@@ -287,6 +335,65 @@ export function discoveryRouter() {
         .sort((a, b) => +new Date(b.likedAt ?? 0) - +new Date(a.likedAt ?? 0)),
     });
   });
+  router.get("/like-notifications", async (req: AuthedRequest, res) => {
+    const { filter, incoming } = await compatibleProfiles(req.userId!);
+    const incomingIds = new Set(incoming.map(String));
+    const profiles = await Profile.find({
+      ...filter,
+      user: {
+        $in: filter.user.$in.filter((id) => incomingIds.has(String(id))),
+      },
+    });
+    const cards = await publicCards(profiles);
+    const byId = new Map(cards.map((card) => [card.id, card]));
+    const declined = await ProfileSwipe.find({
+      user: req.userId,
+      action: { $in: ["pass", "like"] },
+    }).distinct("target");
+    const likes = await ProfileSwipe.find({
+      target: req.userId,
+      action: "like",
+      user: {
+        $in: cards.map((card) => card.id),
+        $nin: declined,
+      },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(100)
+      .lean();
+    res.json({
+      data: likes.map((like) => ({
+        id: String(like._id),
+        member: {
+          id: String(like.user),
+          name: byId.get(String(like.user))!.name,
+        },
+        createdAt: like.updatedAt,
+        readAt: like.notificationReadAt ?? null,
+      })),
+    });
+  });
+  router.post(
+    "/like-notifications/:id/read",
+    async (req: AuthedRequest, res) => {
+      if (!mongoose.isObjectIdOrHexString(req.params.id))
+        throw fail(404, "Notification unavailable.");
+      const { filter } = await compatibleProfiles(req.userId!);
+      const visible = await Profile.find(filter).distinct("user");
+      const updated = await ProfileSwipe.findOneAndUpdate(
+        {
+          _id: req.params.id,
+          target: req.userId,
+          action: "like",
+          user: { $in: visible },
+        },
+        { $set: { notificationReadAt: new Date() } },
+        { timestamps: false },
+      );
+      if (!updated) throw fail(404, "Notification unavailable.");
+      res.status(204).end();
+    },
+  );
   router.get("/:id", async (req: AuthedRequest, res) => {
     if (!mongoose.isObjectIdOrHexString(req.params.id))
       throw fail(404, "Profile unavailable.");
@@ -359,7 +466,12 @@ export function discoveryRouter() {
       throw fail(404, "Profile unavailable.");
     await ProfileSwipe.findOneAndUpdate(
       { user: req.userId, target: req.params.id },
-      { $set: { action: body.action } },
+      {
+        $set: {
+          action: body.action,
+          ...(body.action !== "like" ? { notificationReadAt: null } : {}),
+        },
+      },
       { upsert: true, runValidators: true },
     );
     const mutual =

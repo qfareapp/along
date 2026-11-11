@@ -141,10 +141,12 @@ const swipeSchema = new Schema(
     user: ref("User"),
     target: ref("User"),
     action: { type: String, enum: ["like", "pass", "save"], required: true },
+    notificationReadAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
 swipeSchema.index({ user: 1, target: 1 }, { unique: true });
+swipeSchema.index({ target: 1, action: 1, updatedAt: -1 });
 export const ProfileSwipe = mongoose.model("ProfileSwipe", swipeSchema);
 export const ProfilePhoto = mongoose.model(
   "ProfilePhoto",

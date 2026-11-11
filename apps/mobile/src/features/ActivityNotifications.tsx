@@ -16,6 +16,10 @@ import { useCompletion } from "../services/onboarding";
 import { colors as c } from "../theme";
 import { useRefreshPlans } from "../services/plans";
 import { useSocialNotifications } from "../services/social";
+import {
+  useProfileLikeNotifications,
+  type ProfileLikeNotification,
+} from "../services/profileLikes";
 
 type ActivityNotification = {
   id: string;
@@ -41,9 +45,11 @@ function useActivityNotifications() {
 export function NotificationBell() {
   const notifications = useActivityNotifications();
   const social = useSocialNotifications();
+  const profileLikes = useProfileLikeNotifications();
   const unread =
     (notifications.data?.filter((n) => !n.readAt).length ?? 0) +
-    (social.data?.filter((n) => !n.readAt).length ?? 0);
+    (social.data?.filter((n) => !n.readAt).length ?? 0) +
+    (profileLikes.data?.filter((n) => !n.readAt).length ?? 0);
   return (
     <View>
       <IconButton
@@ -75,10 +81,28 @@ export function NotificationBell() {
 export default function ActivityNotifications() {
   const notifications = useActivityNotifications();
   const social = useSocialNotifications();
+  const profileLikes = useProfileLikeNotifications();
   const client = useQueryClient();
   const refreshPlans = useRefreshPlans();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  async function openProfileLike(item: ProfileLikeNotification) {
+    setBusy(item.id);
+    setError("");
+    try {
+      await api(`/discovery/like-notifications/${item.id}/read`, {
+        method: "POST",
+      });
+      await client.invalidateQueries({
+        queryKey: ["profile-like-notifications"],
+      });
+      router.push(`/person?id=${item.member.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setBusy(null);
+    }
+  }
   async function open(item: ActivityNotification, message: boolean) {
     setBusy(item.id);
     setError("");
@@ -112,7 +136,7 @@ export default function ActivityNotifications() {
     <Screen>
       <Header
         title="Your little updates"
-        subtitle="See who likes your plans and say hello."
+        subtitle="See who likes you and your plans."
         back
       />
       <Button variant="outline" onPress={() => router.push("/social-updates")}>
@@ -126,6 +150,43 @@ export default function ActivityNotifications() {
           {error}
         </Text>
       )}
+      {profileLikes.isPending && !demoMode && (
+        <ActivityIndicator color={c.teal} />
+      )}
+      {profileLikes.error && (
+        <Empty
+          title="Profile likes unavailable"
+          description={profileLikes.error.message}
+        >
+          <Button onPress={() => void profileLikes.refetch()}>Try again</Button>
+        </Empty>
+      )}
+      {profileLikes.data?.map((item) => (
+        <View
+          key={`profile-${item.id}`}
+          style={[
+            card,
+            {
+              padding: 16,
+              marginTop: 14,
+              gap: 10,
+              backgroundColor: item.readAt ? c.white : "#F9DFCE",
+            },
+          ]}
+        >
+          <Text style={text.label}>{item.member.name} liked your profile</Text>
+          <Text style={text.body}>
+            Take a look and decide if you want to connect.
+          </Text>
+          <Button
+            disabled={!!busy}
+            loading={busy === item.id}
+            onPress={() => void openProfileLike(item)}
+          >
+            View profile
+          </Button>
+        </View>
+      ))}
       {notifications.isLoading ? (
         <ActivityIndicator color={c.teal} />
       ) : notifications.error ? (
@@ -137,14 +198,14 @@ export default function ActivityNotifications() {
             Try Again
           </Button>
         </Empty>
-      ) : !notifications.data?.length ? (
+      ) : !notifications.data?.length && !profileLikes.data?.length ? (
         <Empty
           icon="notifications-outline"
           title="You're all caught up"
-          description="When someone likes your activity, you can message them here."
+          description="Profile likes and updates about your plans appear here."
         />
       ) : (
-        notifications.data.map((item) => (
+        (notifications.data ?? []).map((item) => (
           <View
             key={item.id}
             style={[

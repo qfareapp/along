@@ -272,6 +272,12 @@ function ProfileCard({
             style={{ flex: 1, justifyContent: "space-between", padding: 20 }}
           >
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              {member.likedYou && (
+                <View style={[cardPill, { backgroundColor: c.coralBright }]}>
+                  <Ionicons name="heart" size={12} color={c.white} />
+                  <Text style={cardPillText}>Liked you</Text>
+                </View>
+              )}
               {member.mutualMatch ? (
                 <View style={[cardPill, { backgroundColor: c.teal }]}>
                   <Ionicons name="heart" size={12} color={c.coralBright} />
@@ -480,6 +486,10 @@ function DiscoveryFeed() {
         (previous) => previous?.filter((v) => v.id !== member.id) ?? [],
       );
       await client.invalidateQueries({ queryKey: ["profile-likes"] });
+      await client.invalidateQueries({ queryKey: ["liked-me"] });
+      await client.invalidateQueries({
+        queryKey: ["profile-like-notifications"],
+      });
       if (feed.data?.length === 1) void feed.refetch();
     } catch (e) {
       setError(
@@ -515,7 +525,8 @@ function DiscoveryFeed() {
           <Text style={text.label}>Where to meet your kind of person</Text>
           {radius != null ? (
             <Text style={text.body}>
-              Within {radiusLabel} of your saved location
+              Suggestions within {radiusLabel}. People who liked you may be
+              farther away.
             </Text>
           ) : (
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -646,9 +657,13 @@ function LikesList() {
     try {
       const result = await actOnProfile(row.id, action);
       await Promise.all(
-        ["liked-me", "profile-likes", "discovery", "conversations"].map((key) =>
-          client.invalidateQueries({ queryKey: [key] }),
-        ),
+        [
+          "liked-me",
+          "profile-likes",
+          "profile-like-notifications",
+          "discovery",
+          "conversations",
+        ].map((key) => client.invalidateQueries({ queryKey: [key] })),
       );
       if (result.mutual) {
         // Matches live in Chat now: show the moment, then land on the Chat tab.
@@ -718,6 +733,10 @@ function PersonDetail({ id }: { id: string }) {
     try {
       await fn();
       await client.invalidateQueries({ queryKey: ["profile-likes"] });
+      await client.invalidateQueries({ queryKey: ["liked-me"] });
+      await client.invalidateQueries({
+        queryKey: ["profile-like-notifications"],
+      });
       await client.invalidateQueries({ queryKey: ["discovery"] });
       await client.invalidateQueries({ queryKey: ["member-profile", id] });
     } catch (e) {
