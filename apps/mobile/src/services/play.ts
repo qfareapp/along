@@ -29,8 +29,9 @@ export type PlayInvitation = {
   host: PlayConnection;
   own: boolean;
   caption: string;
-  expiresAt: string;
-  status: "open" | "accepted" | "expired" | "cancelled";
+  expiresAt: string | null;
+  recipientId: string | null;
+  status: "open" | "accepted" | "declined" | "expired" | "cancelled";
   sessionId: string | null;
   sessionStatus: string | null;
   requests: {
@@ -57,7 +58,7 @@ export type PlayState = {
   totalQuestions: number;
   startsAt: string | null;
   completedAt: string | null;
-  expiresAt: string;
+  expiresAt: string | null;
   players: (PlayConnection & { own: boolean; ready: boolean })[];
   question: PlayQuestion | null;
   ownAnswer: "A" | "B" | null;
@@ -69,28 +70,47 @@ export type PlayState = {
     categoryScores: Record<string, number>;
     label: string;
   } | null;
+  rounds: (PlayQuestion & {
+    questionIndex: number;
+    ownChoice: "A" | "B";
+    otherChoice: "A" | "B";
+    matched: boolean;
+  })[];
   comparison: (PlayQuestion & {
     ownChoice: "A" | "B";
     otherChoice: "A" | "B";
   })[];
   disclaimer: string;
 };
-export function usePlayQuery<T>(path: string, enabled = true) {
+export type ChatPlayContext = {
+  recipientId: string;
+  invitations: PlayInvitation[];
+  sessions: PlayState[];
+};
+export function usePlayQuery<T>(
+  path: string,
+  enabled = true,
+  refetchInterval: number | false = 10000,
+) {
   const completion = useCompletion();
   return useQuery({
     queryKey: ["play", path],
     queryFn: () => api<T>(`/games${path}`),
     enabled: enabled && !demoMode && !!completion.data?.activated,
     retry: false,
-    refetchInterval: 10000,
+    refetchInterval,
   });
 }
 export const playWrite = <T = unknown>(path: string, body: unknown = {}) =>
   api<T>(`/games${path}`, { method: "POST", body: JSON.stringify(body) });
 export function usePlayRoom(id: string) {
   const client = useQueryClient();
-  const query = usePlayQuery<PlayState>(`/sessions/${id}`, !!id);
   const [connected, setConnected] = useState(false);
+  const query = usePlayQuery<PlayState>(
+    `/sessions/${id}`,
+    !!id,
+    connected ? false : 10000,
+  );
   const [presence, setPresence] = useState("");
   useEffect(() => {
     if (!apiBaseUrl || !id || demoMode) return;
@@ -103,6 +123,18 @@ export function usePlayRoom(id: string) {
     const update = (state: PlayState) => {
       if (state.id === id) {
         client.setQueryData(["play", `/sessions/${id}`], state);
+        client.setQueryData<ChatPlayContext>(
+          ["play", `/conversation/${state.conversationId}`],
+          (old) =>
+            old
+              ? {
+                  ...old,
+                  sessions: old.sessions.map((game) =>
+                    game.id === state.id ? state : game,
+                  ),
+                }
+              : old,
+        );
         setPresence("");
       }
     };
@@ -123,8 +155,12 @@ export function usePlayRoom(id: string) {
       ({ conversationId }: { conversationId: string }) => {
         void client.invalidateQueries({
           queryKey: ["conversation", conversationId],
+          refetchType: "none",
         });
-        void client.invalidateQueries({ queryKey: ["conversations"] });
+        void client.invalidateQueries({
+          queryKey: ["conversations"],
+          refetchType: "none",
+        });
       },
     );
     socket.on("game:player_disconnected", () =>

@@ -16,8 +16,16 @@ process.env.ADMIN_ORIGIN = "http://localhost:3000";
 process.env.EMAIL_VERIFICATION_REQUIRED = "false";
 process.env.TRUST_PROXY_HOPS = "1";
 const { createApp } = await import("./app.js");
-const { User, Profile, ProfileSwipe, Match, Conversation, Block, Activity } =
-  await import("./models.js");
+const {
+  User,
+  Profile,
+  ProfileSwipe,
+  Match,
+  Conversation,
+  Block,
+  Activity,
+  Message,
+} = await import("./models.js");
 const {
   GameDefinition,
   GameQuestion,
@@ -66,29 +74,19 @@ const adminWrite = (
       "X-Forwarded-For": ip(),
     })
     .send(body);
-async function invitation(recipient?: number) {
-  const response = await post("/invitations", {
-    caption: "A friendly game together?",
-    ...(recipient != null ? { recipientId: ids[recipient] } : {}),
-  });
+async function invitation(recipient = 1) {
+  const response = await post("/invitations", { recipientId: ids[recipient] });
   assert.equal(response.status, 201, JSON.stringify(response.body));
   return response.body.data.id as string;
 }
 async function game() {
-  const invite = await invitation(1);
-  const requested = await post(`/invitations/${invite}/requests`, {}, 1);
-  assert.equal(requested.status, 201, JSON.stringify(requested.body));
-  const accepted = await post(`/requests/${requested.body.data.id}/accept`);
+  const invite = await invitation();
+  const accepted = await post(`/invitations/${invite}/accept`, {}, 1);
   assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
   return accepted.body.data.sessionId as string;
 }
-async function start(id: string) {
-  assert.equal((await post(`/sessions/${id}/ready`)).status, 200);
-  assert.equal((await post(`/sessions/${id}/ready`, {}, 1)).status, 200);
-  await GameSession.updateOne(
-    { _id: id },
-    { startsAt: new Date(Date.now() - 1) },
-  );
+async function start(_id: string) {
+  /* Acceptance starts the game immediately. */
 }
 async function finish(id: string, same = 15) {
   await start(id);
@@ -117,6 +115,7 @@ before(
       GameSession.init(),
       Match.init(),
       Conversation.init(),
+      Message.init(),
       SocialNotification.init(),
       ProfileSwipe.init(),
     ]);
@@ -160,6 +159,7 @@ before(
 beforeEach(async () => {
   sequence++;
   await Promise.all([
+    Message.deleteMany({}),
     GameSession.deleteMany({}),
     GameInvitation.deleteMany({}),
     GamePlayRequest.deleteMany({}),
@@ -192,122 +192,6 @@ after(async () => {
   if (db) await db.stop();
 });
 
-test("bank has 100 questions in five categories and only mutual connections can play", async () => {
-  assert.equal(await GameQuestion.countDocuments(), 100);
-  const definition = await get("");
-  assert.equal(definition.status, 200);
-  assert.equal(definition.body.data[0].totalQuestions, 15);
-  const connections = (await get("/connections")).body.data.map(
-    (p: { id: string }) => p.id,
-  );
-  assert.deepEqual(connections.sort(), [ids[1], ids[2]].sort());
-  assert.equal(
-    (await post("/invitations", { recipientId: ids[3] })).status,
-    404,
-  );
-  assert.equal(
-    (await post("/invitations", { recipientId: ids[0] })).status,
-    404,
-  );
-  await request(app).get("/api/v1/games").expect(401);
-});
-test("targeted invitations are private; one-sided likes and outsiders cannot request", async () => {
-  const id = await invitation(1);
-  assert.equal((await get("/invitations", 1)).body.data.length, 1);
-  assert.equal((await get("/invitations", 2)).body.data.length, 0);
-  for (const who of [2, 3, 4])
-    assert.equal(
-      (await post(`/invitations/${id}/requests`, {}, who)).status,
-      404,
-    );
-  assert.equal((await post(`/invitations/${id}/requests`)).status, 400);
-});
-test("Social invitations reach eligible matches only and prevent duplicate requests", async () => {
-  const id = await invitation();
-  assert.equal((await get("/invitations", 2)).body.data.length, 1);
-  assert.equal((await get("/invitations", 3)).body.data.length, 0);
-  assert.equal((await post(`/invitations/${id}/requests`, {}, 1)).status, 201);
-  assert.equal((await post(`/invitations/${id}/requests`, {}, 1)).status, 409);
-  assert.equal(await GamePlayRequest.countDocuments({ invitation: id }), 1);
-});
-test("expired and cancelled invitations cannot start sessions", async () => {
-  const id = await invitation();
-  await GameInvitation.updateOne(
-    { _id: id },
-    { expiresAt: new Date(Date.now() - 1) },
-  );
-  assert.equal((await post(`/invitations/${id}/requests`, {}, 1)).status, 409);
-  const next = await invitation();
-  await post(`/invitations/${next}/cancel`);
-  assert.equal(
-    (await post(`/invitations/${next}/requests`, {}, 1)).status,
-    409,
-  );
-  assert.equal((await post(`/invitations/${next}/cancel`, {}, 1)).status, 409);
-});
-test("Social audience privacy is respected while a direct chat invitation remains explicit", async () => {
-  await SocialSettings.create({ user: ids[0], hidden: [ids[1]] });
-  const broadcast = await invitation();
-  assert.equal((await get("/invitations", 1)).body.data.length, 0);
-  assert.equal(
-    (await post(`/invitations/${broadcast}/requests`, {}, 1)).status,
-    404,
-  );
-  const direct = await invitation(1);
-  assert.equal((await get("/invitations", 1)).body.data[0].id, direct);
-  assert.equal(
-    (await post(`/invitations/${direct}/requests`, {}, 1)).status,
-    201,
-  );
-});
-test("simultaneous accepts claim exactly one request and one session", async () => {
-  const id = await invitation();
-  const a = await post(`/invitations/${id}/requests`, {}, 1),
-    b = await post(`/invitations/${id}/requests`, {}, 2);
-  const responses = await Promise.all([
-    post(`/requests/${a.body.data.id}/accept`),
-    post(`/requests/${b.body.data.id}/accept`),
-  ]);
-  assert.deepEqual(responses.map((r) => r.status).sort(), [200, 409]);
-  assert.equal(await GameSession.countDocuments(), 1);
-  assert.equal(await GamePlayRequest.countDocuments({ status: "accepted" }), 1);
-  assert.equal(
-    await GamePlayRequest.countDocuments({ status: "unavailable" }),
-    1,
-  );
-  assert.equal((await post(`/invitations/${id}/requests`, {}, 1)).status, 409);
-});
-test("only the host accepts; nonparticipants cannot view or join the session", async () => {
-  const id = await invitation();
-  const requested = await post(`/invitations/${id}/requests`, {}, 1);
-  assert.equal(
-    (await post(`/requests/${requested.body.data.id}/accept`, {}, 2)).status,
-    409,
-  );
-  const accepted = await post(`/requests/${requested.body.data.id}/accept`);
-  const session = accepted.body.data.sessionId;
-  assert.equal((await get(`/sessions/${session}`, 2)).status, 404);
-  assert.equal((await post(`/sessions/${session}/ready`, {}, 2)).status, 404);
-  assert.equal((await get("/invitations", 2)).body.data[0].sessionId, null);
-});
-test("both players must be ready and the server enforces the countdown", async () => {
-  const id = await game();
-  assert.equal((await get(`/sessions/${id}`)).body.data.question, null);
-  await post(`/sessions/${id}/ready`);
-  assert.equal((await get(`/sessions/${id}`)).body.data.status, "waiting");
-  assert.equal(
-    (await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "A" }))
-      .status,
-    409,
-  );
-  await post(`/sessions/${id}/ready`, {}, 1);
-  assert.equal((await get(`/sessions/${id}`)).body.data.status, "playing");
-  assert.equal(
-    (await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "A" }))
-      .status,
-    409,
-  );
-});
 test("identical unique questions, hidden answers and no early results", async () => {
   const id = await game();
   await start(id);
@@ -430,35 +314,6 @@ test("reopening restores progress and own submitted choice without revealing the
   assert.equal(reload.body.data.currentQuestionIndex, 0);
   assert.equal((await get(`/sessions/${id}`, 1)).body.data.ownAnswer, null);
 });
-test("timeouts and leaving abandon the game without a misleading score", async () => {
-  const id = await game();
-  await start(id);
-  await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "A" });
-  await GameSession.updateOne(
-    { _id: id },
-    { lastActionAt: new Date(Date.now() - 31 * 60000) },
-  );
-  const response = await get(`/sessions/${id}`);
-  assert.equal(response.body.data.status, "abandoned");
-  assert.equal(response.body.data.result, null);
-  assert.deepEqual(response.body.data.comparison, []);
-  assert.equal(
-    (
-      await post(
-        `/sessions/${id}/answers`,
-        { questionIndex: 0, choice: "A" },
-        1,
-      )
-    ).status,
-    409,
-  );
-  const next = await game();
-  await post(`/sessions/${next}/leave`);
-  assert.equal(
-    (await get(`/sessions/${next}`, 1)).body.data.status,
-    "abandoned",
-  );
-});
 test("blocks, unmatches, eligibility loss and suspension revoke gameplay and history", async () => {
   const id = await game();
   await Block.create({ user: ids[1], target: ids[0] });
@@ -474,94 +329,6 @@ test("blocks, unmatches, eligibility loss and suspension revoke gameplay and his
   await Profile.updateOne({ user: ids[1] }, { photos: photos[1] });
   await User.updateOne({ _id: ids[1] }, { status: "suspended" });
   assert.equal((await get(`/sessions/${id}`)).status, 404);
-});
-test("play notifications respect preferences, deduplicate and route to the private game", async () => {
-  await SocialSettings.create({ user: ids[2], notifications: false });
-  const invite = await invitation();
-  assert.equal(
-    await SocialNotification.countDocuments({ recipient: ids[2] }),
-    0,
-  );
-  assert.equal(
-    await SocialNotification.countDocuments({
-      recipient: ids[1],
-      kind: "game_invitation",
-    }),
-    1,
-  );
-  const requested = await post(`/invitations/${invite}/requests`, {}, 1);
-  await post(`/invitations/${invite}/requests`, {}, 1);
-  assert.equal(
-    await SocialNotification.countDocuments({
-      recipient: ids[0],
-      kind: "game_request",
-    }),
-    1,
-  );
-  const accepted = await post(`/requests/${requested.body.data.id}/accept`);
-  const rows = await request(app)
-    .get("/api/v1/social/notifications")
-    .auth(access[1], { type: "bearer" });
-  assert(
-    rows.body.data.some(
-      (n: { gameSessionId: string }) =>
-        n.gameSessionId === accepted.body.data.sessionId,
-    ),
-  );
-});
-test("rematches create fresh sessions, avoid repeated questions and preserve history", async () => {
-  const id = await game();
-  await finish(id);
-  const old = await GameSession.findById(id).select("+answers");
-  const rematch = await post(`/sessions/${id}/rematch`, {}, 1);
-  assert.equal(rematch.status, 201);
-  const requested = await post(`/invitations/${rematch.body.data.id}/requests`);
-  const accepted = await post(
-    `/requests/${requested.body.data.id}/accept`,
-    {},
-    1,
-  );
-  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
-  const next = await GameSession.findById(accepted.body.data.sessionId);
-  const oldIds = new Set(old!.questions.map((q) => String(q.questionId)));
-  assert(next!.questions.every((q) => !oldIds.has(String(q.questionId))));
-  assert.equal((await GameSession.findById(id))!.status, "completed");
-  assert.equal(old!.answers.length, 30);
-});
-test("plan proposals stay private and unconfirmed until the other player accepts", async () => {
-  const id = await game();
-  const proposal = {
-    title: "Coffee Together?",
-    category: "food",
-    zone: "A public cafe",
-    startsAt: new Date(Date.now() + 86400000).toISOString(),
-  };
-  assert.equal((await post(`/sessions/${id}/make-plan`, proposal)).status, 409);
-  await finish(id);
-  const suggestions = await get(`/sessions/${id}/plan-suggestions`);
-  assert.equal(suggestions.status, 200);
-  const proposed = await post(`/sessions/${id}/make-plan`, proposal);
-  assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
-  const retried = await post(`/sessions/${id}/make-plan`, proposal);
-  assert.equal(retried.body.data.id, proposed.body.data.id);
-  assert.equal(await PlanInvitation.countDocuments(), 1);
-  assert.equal(await Activity.countDocuments(), 0);
-  assert.equal(
-    (await PlanInvitation.findById(proposed.body.data.id))!.status,
-    "pending",
-  );
-  const response = await request(app)
-    .post(`/api/v1/social/invitations/${proposed.body.data.id}/respond`)
-    .set("X-Forwarded-For", ip())
-    .auth(access[1], { type: "bearer" })
-    .send({ action: "accept", version: 0 });
-  assert.equal(response.status, 204, JSON.stringify(response.body));
-  const activity = await Activity.findOne({});
-  assert.equal(activity!.visibility, "private");
-  assert.deepEqual(
-    activity!.participants.map(String).sort(),
-    ids.slice(0, 2).sort(),
-  );
 });
 test("admin question management requires permissions and logs edits without changing session snapshots", async () => {
   const bank = await admin.get("/api/v1/admin/games/questions");
@@ -673,8 +440,6 @@ test(
       assert((await emit(2, "game:join", { sessionId: id })).error);
       assert((await emit(0, "game:join", { sessionId: id })).data);
       assert((await emit(1, "game:join", { sessionId: id })).data);
-      await emit(0, "game:ready", { sessionId: id });
-      await emit(1, "game:ready", { sessionId: id });
       await GameSession.updateOne(
         { _id: id },
         { startsAt: new Date(Date.now() - 1) },
@@ -724,3 +489,234 @@ test(
     }
   },
 );
+
+test("direct invitation appears only in its chat, recipient accepts without host approval", async () => {
+  const invite = await invitation();
+  const stored = await GameInvitation.findById(invite);
+  const conversation = String(stored!.conversation);
+  assert.equal(stored!.expiresAt, null);
+  assert.equal((await post(`/invitations/${invite}/accept`)).status, 404);
+  assert.equal(
+    (await post(`/invitations/${invite}/accept`, {}, 2)).status,
+    404,
+  );
+  const thread = await request(app)
+    .get(`/api/v1/conversations/${conversation}`)
+    .auth(access[1], { type: "bearer" });
+  assert.equal(thread.body.data.messages[0].gameInvitationId, invite);
+  assert.equal(await SocialNotification.countDocuments(), 0);
+  const accepted = await post(`/invitations/${invite}/accept`, {}, 1);
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  const state = (await get(`/sessions/${accepted.body.data.sessionId}`)).body
+    .data;
+  assert.equal(state.status, "playing");
+  assert(state.question);
+  assert.equal(state.expiresAt, null);
+  assert.equal(
+    (
+      await post(`/sessions/${state.id}/answers`, {
+        questionIndex: 0,
+        choice: "A",
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await post(`/invitations/${invite}/accept`, {}, 1)).body.data.sessionId,
+    state.id,
+  );
+});
+test("no broadcast or one-sided likes can send a game request", async () => {
+  assert.equal((await post("/invitations", {})).status, 400);
+  assert.equal(
+    (await post("/invitations", { recipientId: ids[3] })).status,
+    404,
+  );
+  const out = await request(app)
+    .post("/api/v1/games/invitations")
+    .set("X-Forwarded-For", ip())
+    .auth(access[3], { type: "bearer" })
+    .send({ recipientId: ids[0] });
+  assert.equal(out.status, 404);
+  assert((await GameQuestion.countDocuments()) >= 100);
+});
+test("recipient rejection ends the invitation and notifies the sender only in chat", async () => {
+  const invite = await invitation();
+  const declined = await post(`/invitations/${invite}/decline`, {}, 1);
+  assert.equal(declined.status, 200);
+  assert.equal((await GameInvitation.findById(invite))!.status, "declined");
+  assert.equal(await GameSession.countDocuments(), 0);
+  assert.equal(
+    await Message.countDocuments({
+      gameEvent: "declined",
+      sender: ids[1],
+      readAt: null,
+    }),
+    1,
+  );
+  assert.equal(await SocialNotification.countDocuments(), 0);
+  assert.equal(
+    (await post(`/invitations/${invite}/accept`, {}, 1)).status,
+    409,
+  );
+});
+test("offline invitations and saved turns survive days away; every round reveals only after both answer", async () => {
+  const invite = await invitation();
+  await GameInvitation.updateOne(
+    { _id: invite },
+    { createdAt: new Date(Date.now() - 7 * 86400000) },
+  );
+  const accepted = await post(`/invitations/${invite}/accept`, {}, 1);
+  assert.equal(accepted.status, 200);
+  const id = accepted.body.data.sessionId;
+  await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "B" });
+  await GameSession.updateOne(
+    { _id: id },
+    { lastActionAt: new Date(Date.now() - 7 * 86400000) },
+  );
+  const away = (await get(`/sessions/${id}`, 1)).body.data;
+  assert.equal(away.status, "playing");
+  assert.equal(away.opponentAnswered, true);
+  assert.deepEqual(away.rounds, []);
+  assert.equal(away.ownAnswer, null);
+  const first = await Message.findOne({ gameEvent: "turn" });
+  assert(first);
+  assert(!first.text.includes("optionB"));
+  const reply = await post(
+    `/sessions/${id}/answers`,
+    { questionIndex: 0, choice: "A" },
+    1,
+  );
+  assert.equal(reply.status, 200, JSON.stringify(reply.body));
+  assert.equal(reply.body.data.currentQuestionIndex, 1);
+  assert.equal(reply.body.data.rounds[0].matched, false);
+  assert.equal(reply.body.data.rounds[0].ownChoice, "A");
+  const returned = (await get(`/sessions/${id}`)).body.data;
+  assert.equal(returned.rounds[0].ownChoice, "B");
+  assert.equal(returned.rounds[0].otherChoice, "A");
+  await post(`/sessions/${id}/answers`, { questionIndex: 1, choice: "A" });
+  await post(`/sessions/${id}/answers`, { questionIndex: 1, choice: "A" }, 1);
+  assert.equal(
+    (await get(`/sessions/${id}`)).body.data.rounds[1].matched,
+    true,
+  );
+  assert.equal(await Message.countDocuments({ gameEvent: "turn" }), 2);
+  assert.equal(await Message.countDocuments({ gameEvent: "round" }), 2);
+  assert.equal(await SocialNotification.countDocuments(), 0);
+});
+test("parallel invitations and accepts cannot create duplicate chat games", async () => {
+  const sends = await Promise.all([
+    post("/invitations", { recipientId: ids[1] }),
+    post("/invitations", { recipientId: ids[1] }),
+  ]);
+  assert.deepEqual(sends.map((r) => r.status).sort(), [201, 409]);
+  const invite = sends.find((r) => r.status === 201)!.body.data.id;
+  const accepts = await Promise.all([
+    post(`/invitations/${invite}/accept`, {}, 1),
+    post(`/invitations/${invite}/accept`, {}, 1),
+  ]);
+  assert(accepts.every((r) => [200, 409].includes(r.status)));
+  assert.equal(await GameSession.countDocuments(), 1);
+  assert.equal(await Message.countDocuments({ gameEvent: "accepted" }), 1);
+  assert.equal(
+    (await post("/invitations", { recipientId: ids[1] })).status,
+    409,
+  );
+});
+test("chat unread badge records offline game turns and clears when the chat is opened", async () => {
+  const id = await game();
+  const conversation = String((await GameSession.findById(id))!.conversation);
+  await Message.updateMany({}, { readAt: new Date() });
+  await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "B" });
+  await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "B" });
+  const list = await request(app)
+    .get("/api/v1/conversations")
+    .auth(access[1], { type: "bearer" });
+  const row = list.body.data.find((r: { id: string }) => r.id === conversation);
+  assert.equal(row.unread, 1);
+  assert.equal(row.lastMessage.gameEvent, "turn");
+  await request(app)
+    .get(`/api/v1/conversations/${conversation}`)
+    .auth(access[1], { type: "bearer" })
+    .expect(200);
+  assert.equal(
+    await Message.countDocuments({
+      conversation,
+      sender: ids[0],
+      readAt: null,
+    }),
+    0,
+  );
+});
+test("explicit ending creates no score and permits a new direct invitation", async () => {
+  const id = await game();
+  await post(`/sessions/${id}/leave`);
+  assert.equal((await get(`/sessions/${id}`)).body.data.status, "abandoned");
+  assert.equal((await get(`/sessions/${id}`)).body.data.result, null);
+  await invitation();
+});
+test("messaging restrictions cannot be bypassed using game requests or answers", async () => {
+  await User.updateOne({ _id: ids[0] }, { "restrictions.messaging": true });
+  assert.equal(
+    (await post("/invitations", { recipientId: ids[1] })).status,
+    403,
+  );
+  await User.updateOne({ _id: ids[0] }, { restrictions: {} });
+  const id = await game();
+  await User.updateOne({ _id: ids[1] }, { "restrictions.messaging": true });
+  assert.equal(
+    (
+      await post(
+        `/sessions/${id}/answers`,
+        { questionIndex: 0, choice: "A" },
+        1,
+      )
+    ).status,
+    403,
+  );
+});
+
+test("host cancellation closes the request atomically and sends a chat notice", async () => {
+  const invite = await invitation();
+  assert.equal(
+    (await post(`/invitations/${invite}/cancel`, {}, 1)).status,
+    409,
+  );
+  assert.equal((await post(`/invitations/${invite}/cancel`)).status, 204);
+  assert.equal(
+    (await post(`/invitations/${invite}/accept`, {}, 1)).status,
+    409,
+  );
+  assert.equal((await GameInvitation.findById(invite))!.status, "cancelled");
+  assert.equal(await Message.countDocuments({ gameEvent: "cancelled" }), 1);
+  assert.equal(await GameSession.countDocuments(), 0);
+});
+test("Social settings do not gate a private matched chat game and old Social game notices stay hidden", async () => {
+  await SocialSettings.create({
+    user: ids[1],
+    enabled: false,
+    notifications: false,
+    hidden: [ids[0]],
+  });
+  const id = await game();
+  assert.equal(
+    (await post(`/sessions/${id}/answers`, { questionIndex: 0, choice: "A" }))
+      .status,
+    200,
+  );
+  await SocialNotification.create({
+    recipient: ids[0],
+    actor: ids[1],
+    kind: "game_waiting",
+    key: "legacy-game-notice",
+    gameSession: id,
+  });
+  const notifications = await request(app)
+    .get("/api/v1/social/notifications")
+    .auth(access[0], { type: "bearer" });
+  assert(
+    !notifications.body.data.some((n: { kind: string }) =>
+      n.kind.startsWith("game_"),
+    ),
+  );
+});

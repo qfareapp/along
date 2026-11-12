@@ -78,6 +78,12 @@ export function createApp() {
     rateLimit({
       windowMs: 60000,
       limit: 120,
+      message: {
+        error: {
+          code: "RATE_LIMITED",
+          message: "Too many requests. Please wait a moment and try again.",
+        },
+      },
       standardHeaders: "draft-8",
       legacyHeaders: false,
     }),

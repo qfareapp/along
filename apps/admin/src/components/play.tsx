@@ -162,7 +162,8 @@ export function AlongPlayAdmin() {
           <h2 className="font-semibold">This or That settings</h2>
           <p className="text-sm text-muted-foreground">
             {definition.questionsPerCategory * 5} questions per new game.
-            Existing games keep their saved configuration.
+            Existing games keep their saved configuration. Chat invitations and
+            games do not expire while a match is away.
           </p>
           <label className="flex items-center gap-2 text-sm">
             <input
@@ -178,8 +179,6 @@ export function AlongPlayAdmin() {
             {(
               [
                 ["questionsPerCategory", "Questions per category", 1, 5],
-                ["invitationMinutes", "Invitation expires (minutes)", 5, 120],
-                ["inactivityMinutes", "Resume window (minutes)", 5, 120],
               ] as const
             ).map(([key, label, min, max]) => (
               <label key={key} className="text-sm">

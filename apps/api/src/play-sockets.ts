@@ -72,7 +72,7 @@ export function attachPlaySockets(server: HttpServer) {
       }),
     );
   }
-  setPlayPublisher(broadcast);
+  setPlayPublisher((sessionId) => broadcast(sessionId, true));
   play.on("connection", (socket) => {
     let windowStart = Date.now(),
       events = 0;

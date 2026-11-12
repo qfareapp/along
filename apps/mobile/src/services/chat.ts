@@ -18,6 +18,9 @@ export type ChatAttachment = {
   path: string;
 };
 export type ChatMessage = {
+  gameInvitationId?: string | null;
+  gameSessionId?: string | null;
+  gameEvent?: string | null;
   socialMomentId?: string | null;
   attachment?: ChatAttachment | null;
   id: string;

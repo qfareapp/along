@@ -9,6 +9,7 @@ import {
   Category,
   Conversation,
   Match,
+  Message,
   Profile,
   User,
 } from "./models.js";
@@ -18,16 +19,12 @@ import {
   fail,
   requireReady,
 } from "./onboarding.js";
-import { pairKey, openConversation } from "./chat.js";
-import {
-  PlanInvitation,
-  SocialNotification,
-  SocialSettings,
-} from "./social-models.js";
+import { pairKey, openConversation, assertCanSend } from "./chat.js";
+import { PlanInvitation, SocialNotification } from "./social-models.js";
+import { chatEvents } from "./chat-events.js";
 import {
   GameDefinition,
   GameInvitation,
-  GamePlayRequest,
   GameQuestion,
   GameSession,
   playCategories,
@@ -78,48 +75,37 @@ export async function authorizePlayPair(a: string, b: string) {
     throw fail(404, "Open your matched conversation before playing.");
   return conversation;
 }
-async function socialPlayConnections(userId: string) {
-  const peers = await playConnections(userId);
-  const settings = await SocialSettings.find({
-    user: { $in: [userId, ...peers] },
-  }).lean();
-  const mine = settings.find((s) => String(s.user) === userId);
-  if (mine?.enabled === false) return [];
-  return peers.filter((id) => {
-    const theirs = settings.find((s) => String(s.user) === id);
-    return (
-      theirs?.enabled !== false &&
-      !includes(mine?.hidden ?? [], id) &&
-      !includes(theirs?.hidden ?? [], userId)
-    );
-  });
-}
-async function notifyPlay(
+// Game notices are real messages in the existing matched conversation. They
+// participate in chat previews, unread counts and read receipts, never Social.
+async function gameMessage(
   actor: string,
-  recipient: string,
-  kind: string,
+  conversation: unknown,
+  event: string,
   key: string,
+  text: string,
   invitation?: unknown,
-  session?: unknown,
+  gameSession?: unknown,
+  transaction?: mongoose.ClientSession,
 ) {
-  const settings = await SocialSettings.findOne({ user: recipient }).lean();
-  if (
-    settings?.notifications === false ||
-    includes(settings?.muted ?? [], actor)
-  )
-    return;
-  await SocialNotification.updateOne(
-    { key },
+  await Message.updateOne(
+    { gameEventKey: key },
     {
       $setOnInsert: {
-        actor,
-        recipient,
-        kind,
+        conversation,
+        sender: actor,
+        text,
+        gameEvent: event,
+        gameEventKey: key,
         gameInvitation: invitation,
-        gameSession: session,
+        gameSession,
       },
     },
-    { upsert: true },
+    { upsert: true, session: transaction },
+  );
+  await Conversation.updateOne(
+    { _id: conversation },
+    { $set: { updatedAt: new Date() } },
+    { session: transaction },
   );
 }
 function shuffle<T>(values: T[]) {
@@ -213,18 +199,11 @@ export async function authorizedSession(userId: string, sessionId: unknown) {
     throw fail(404, "Game unavailable.");
   const other = String(session.players.find((p) => String(p) !== userId));
   await authorizePlayPair(userId, other);
-  if (
-    ["waiting", "playing"].includes(session.status) &&
-    Date.now() - session.lastActionAt.getTime() >
-      session.inactivityMinutes * 60000
-  ) {
+  // Existing accepted games also resume without a ready check or countdown.
+  if (session.status === "waiting") {
     await GameSession.updateOne(
-      {
-        _id: session._id,
-        status: session.status,
-        lastActionAt: session.lastActionAt,
-      },
-      { $set: { status: "abandoned" }, $inc: { __v: 1 } },
+      { _id: session._id, status: "waiting" },
+      { $set: { status: "playing", startsAt: new Date() }, $inc: { __v: 1 } },
     );
     return (await GameSession.findById(session._id).select("+answers"))!;
   }
@@ -248,9 +227,7 @@ async function sessionDto(session: PlaySession, userId: string) {
     totalQuestions: session.questions.length,
     startsAt: session.startsAt ?? null,
     completedAt: session.completedAt ?? null,
-    expiresAt: new Date(
-      session.lastActionAt.getTime() + session.inactivityMinutes * 60000,
-    ),
+    expiresAt: null,
     players: session.players.map((p) => ({
       id: String(p),
       own: String(p) === userId,
@@ -281,6 +258,26 @@ async function sessionDto(session: PlaySession, userId: string) {
         String(a.player) !== userId &&
         a.questionIndex === session.currentQuestionIndex,
     ),
+    rounds: session.questions.flatMap((q, i) => {
+      const own = session.answers.find(
+        (a) => a.questionIndex === i && String(a.player) === userId,
+      );
+      const other = session.answers.find(
+        (a) => a.questionIndex === i && String(a.player) !== userId,
+      );
+      return own && other
+        ? [
+            {
+              ...q.toObject(),
+              questionId: String(q.questionId),
+              questionIndex: i,
+              ownChoice: own.choice,
+              otherChoice: other.choice,
+              matched: own.choice === other.choice,
+            },
+          ]
+        : [];
+    }),
     result: finished ? session.result : null,
     disclaimer: playDisclaimer,
     comparison: finished
@@ -326,16 +323,16 @@ export async function mutatePlay(
       : null;
   for (let retry = 0; retry < 6; retry++) {
     const session = await authorizedSession(userId, sessionId);
-    if (action === "leave" && ["waiting", "playing"].includes(session.status))
+    const conversation = await authorizePlayPair(
+      userId,
+      String(session.players.find((p) => String(p) !== userId)),
+    );
+    await assertCanSend(userId, conversation);
+    if (action === "ready") return sessionDto(session, userId); // older clients need no ready handshake
+    if (action === "leave") {
+      if (!["waiting", "playing"].includes(session.status))
+        return sessionDto(session, userId);
       session.status = "abandoned";
-    else if (action === "ready") {
-      if (session.status !== "waiting") return sessionDto(session, userId);
-      if (!includes(session.ready, userId))
-        session.ready.push(new mongoose.Types.ObjectId(userId));
-      if (session.ready.length === 2) {
-        session.status = "playing";
-        session.startsAt = new Date(Date.now() + 3000);
-      }
     } else if (input) {
       const existing = session.answers.find(
         (a) =>
@@ -347,14 +344,9 @@ export async function mutatePlay(
           throw fail(409, "Your answer is already locked in.");
         return sessionDto(session, userId);
       }
-      if (
-        session.status !== "playing" ||
-        !session.startsAt ||
-        session.startsAt.getTime() > Date.now()
-      )
-        throw fail(409, "Wait for both players and the countdown.");
+      if (session.status !== "playing") throw fail(409, "This game has ended.");
       if (input.questionIndex !== session.currentQuestionIndex)
-        throw fail(409, "This question has changed. Refresh the game.");
+        throw fail(409, "This question has changed. Refresh the chat.");
       session.answers.push({
         player: new mongoose.Types.ObjectId(userId),
         questionIndex: input.questionIndex,
@@ -372,33 +364,69 @@ export async function mutatePlay(
           session.set("result", scorePlay(session));
         }
       }
-    } else if (action !== "leave") throw fail(409, "Game unavailable.");
+    }
     session.lastActionAt = new Date();
     try {
-      await session.save();
-      const other = String(session.players.find((p) => String(p) !== userId));
-      if (session.status === "completed")
-        for (const player of session.players.map(String))
-          await notifyPlay(
-            String(session.players.find((p) => String(p) !== player)),
-            player,
-            "game_completed",
-            `game-completed:${session._id}:${player}`,
+      await mongoose.connection.transaction(async (transaction) => {
+        await session.save({ session: transaction });
+        if (input) {
+          const answers = session.answers.filter(
+            (a) => a.questionIndex === input.questionIndex,
+          );
+          const q = session.questions[input.questionIndex]!;
+          if (answers.length === 2) {
+            const label = (choice: string) =>
+              choice === "A" ? q.optionA : q.optionB;
+            const text =
+              answers[0]!.choice === answers[1]!.choice
+                ? `Question ${input.questionIndex + 1}: It's a match! You both chose ${label(answers[0]!.choice)}.`
+                : `Question ${input.questionIndex + 1}: Different choices! ${label(answers[0]!.choice)} / ${label(answers[1]!.choice)}.`;
+            await gameMessage(
+              userId,
+              session.conversation,
+              "round",
+              `play-round:${session._id}:${input.questionIndex}`,
+              text,
+              session.invitation,
+              session._id,
+              transaction,
+            );
+            if (session.status === "completed")
+              await gameMessage(
+                userId,
+                session.conversation,
+                "completed",
+                `play-completed:${session._id}`,
+                `This or That complete! Your matching score is ${session.result?.score}%.`,
+                session.invitation,
+                session._id,
+                transaction,
+              );
+          } else {
+            await gameMessage(
+              userId,
+              session.conversation,
+              "turn",
+              `play-turn:${session._id}:${input.questionIndex}`,
+              `I've answered question ${input.questionIndex + 1} in This or That. Your turn whenever you're ready!`,
+              session.invitation,
+              session._id,
+              transaction,
+            );
+          }
+        } else {
+          await gameMessage(
+            userId,
+            session.conversation,
+            "ended",
+            `play-ended:${session._id}`,
+            "This or That was ended. You can send a new invitation anytime.",
             session.invitation,
             session._id,
+            transaction,
           );
-      else if (
-        action === "ready" ||
-        (action === "answer" && session.currentQuestionIndex === 0)
-      )
-        await notifyPlay(
-          userId,
-          other,
-          action === "ready" ? "game_ready" : "game_waiting",
-          `game-${action}:${session._id}:${userId}`,
-          session.invitation,
-          session._id,
-        );
+        }
+      });
       await publishPlay(String(session._id));
       return sessionDto(session, userId);
     } catch (error) {
@@ -417,20 +445,6 @@ async function invitationDto(
     .select("photos")
     .lean();
   const own = String(invite.host) === userId;
-  const requesters = await GamePlayRequest.find({
-    invitation: invite._id,
-    ...(own ? {} : { user: userId }),
-  }).lean();
-  const allowed = own ? await playConnections(userId) : [];
-  const users = await User.find({
-    _id: {
-      $in: requesters
-        .filter((r) => (own ? allowed.includes(String(r.user)) : true))
-        .map((r) => r.user),
-    },
-  })
-    .select("name")
-    .lean();
   const linked = invite.session
     ? await GameSession.findById(invite.session).select("status players").lean()
     : null;
@@ -443,39 +457,20 @@ async function invitationDto(
     },
     own,
     caption: invite.caption,
-    expiresAt: invite.expiresAt,
+    expiresAt: null,
+    recipientId: invite.recipient ? String(invite.recipient) : null,
     status:
-      invite.status === "open" && invite.expiresAt <= new Date()
+      invite.status === "open" &&
+      !!invite.expiresAt &&
+      invite.expiresAt <= new Date()
         ? "expired"
         : invite.status,
     sessionId:
       linked && includes(linked.players, userId) ? String(linked._id) : null,
     sessionStatus:
       linked && includes(linked.players, userId) ? linked.status : null,
-    requests: requesters
-      .filter((r) => users.some((u) => String(u._id) === String(r.user)))
-      .map((r) => ({
-        id: String(r._id),
-        userId: String(r.user),
-        name: users.find((u) => String(u._id) === String(r.user))!.name,
-        status: r.status,
-      })),
+    requests: [],
   };
-}
-async function visibleInvitation(userId: string, value: unknown) {
-  const invite = await GameInvitation.findById(playId(value));
-  if (!invite) throw fail(404, "Play invitation unavailable.");
-  if (String(invite.host) !== userId) {
-    await authorizePlayPair(userId, String(invite.host));
-    if (invite.recipient && String(invite.recipient) !== userId)
-      throw fail(404, "Play invitation unavailable.");
-    if (
-      !invite.recipient &&
-      !(await socialPlayConnections(userId)).includes(String(invite.host))
-    )
-      throw fail(404, "Play invitation unavailable.");
-  }
-  return invite;
 }
 async function createInvitation(
   userId: string,
@@ -496,46 +491,52 @@ async function createInvitation(
     .parse(raw);
   const definition = await playDefinition();
   if (!definition.active) throw fail(409, "This or That is taking a break.");
+  if (!input.recipientId)
+    throw fail(400, "Send a play invitation to a match from your chat.");
+  const conversation = await authorizePlayPair(userId, input.recipientId);
+  await assertCanSend(userId, conversation);
   if (
-    (await User.findById(userId).select("restrictions"))?.restrictions?.posting
+    await GameSession.exists({
+      conversation: conversation._id,
+      status: { $in: ["waiting", "playing"] },
+    })
   )
-    throw fail(403, "Posting is restricted.");
-  const connections = input.recipientId
-    ? await playConnections(userId)
-    : await socialPlayConnections(userId);
-  if (!connections.length)
-    throw fail(
-      409,
-      "Make a mutual connection before inviting someone to play.",
-    );
-  if (input.recipientId) {
-    playId(input.recipientId);
-    await authorizePlayPair(userId, input.recipientId);
+    throw fail(409, "Finish your current game in this chat first.");
+  let invite: InstanceType<typeof GameInvitation>;
+  try {
+    await mongoose.connection.transaction(async (transaction) => {
+      const [created] = await GameInvitation.create(
+        [
+          {
+            host: userId,
+            recipient: input.recipientId,
+            conversation: conversation._id,
+            caption: input.caption,
+            expiresAt: null,
+            ...(rematchOf ? { rematchOf } : {}),
+          },
+        ],
+        { session: transaction },
+      );
+      invite = created!;
+      await gameMessage(
+        userId,
+        conversation._id,
+        "invitation",
+        `play-invite:${invite._id}`,
+        "Want to play This or That? Accept or reject this invitation below.",
+        invite._id,
+        undefined,
+        transaction,
+      );
+    });
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000)
+      throw fail(409, "A play invitation is already waiting in this chat.");
+    throw error;
   }
-  if (
-    (await GameInvitation.countDocuments({
-      host: userId,
-      status: "open",
-      expiresAt: { $gt: new Date() },
-    })) >= 3
-  )
-    throw fail(409, "You already have three open invitations.");
-  const invite = await GameInvitation.create({
-    host: userId,
-    recipient: input.recipientId,
-    caption: input.caption,
-    expiresAt: new Date(Date.now() + definition.invitationMinutes * 60000),
-    ...(rematchOf ? { rematchOf } : {}),
-  });
-  for (const recipient of input.recipientId ? [input.recipientId] : connections)
-    await notifyPlay(
-      userId,
-      recipient,
-      rematchOf ? "game_rematch" : "game_invitation",
-      `play-invite:${invite._id}:${recipient}`,
-      invite._id,
-    );
-  return invitationDto(invite, userId);
+  chatEvents.emit("changed", String(conversation._id));
+  return invitationDto(invite!, userId);
 }
 export function playRouter() {
   const router = Router();
@@ -544,7 +545,16 @@ export function playRouter() {
     res.set("Cache-Control", "private, no-store");
     next();
   });
-  const write = rateLimit({ windowMs: 60000, limit: 45 });
+  const write = rateLimit({
+    windowMs: 60000,
+    limit: 45,
+    message: {
+      error: {
+        code: "RATE_LIMITED",
+        message: "Please wait a moment before your next game action.",
+      },
+    },
+  });
   router.get("/", async (_req, res) => {
     const d = await playDefinition();
     res.json({
@@ -589,7 +599,6 @@ export function playRouter() {
       recipient: { $in: [req.userId, otherId] },
       host: { $in: [req.userId, otherId] },
       status: "open",
-      expiresAt: { $gt: new Date() },
     })
       .sort({ _id: -1 })
       .limit(10);
@@ -613,15 +622,10 @@ export function playRouter() {
   });
   router.get("/invitations", async (req: AuthedRequest, res) => {
     const peers = await playConnections(req.userId!);
-    const socialPeers = await socialPlayConnections(req.userId!);
     const invites = await GameInvitation.find({
       $or: [
-        { host: req.userId },
-        { host: { $in: socialPeers }, recipient: null },
-        {
-          host: { $in: peers },
-          recipient: req.userId,
-        },
+        { host: req.userId, recipient: { $in: peers } },
+        { recipient: req.userId, host: { $in: peers } },
       ],
     })
       .sort({ _id: -1 })
@@ -641,166 +645,125 @@ export function playRouter() {
     "/invitations/:id/cancel",
     write,
     async (req: AuthedRequest, res) => {
-      const changed = await GameInvitation.findOneAndUpdate(
-        { _id: playId(req.params.id), host: req.userId, status: "open" },
-        { status: "cancelled" },
+      const invite = await GameInvitation.findOne({
+        _id: playId(req.params.id),
+        host: req.userId,
+        status: "open",
+      });
+      if (!invite || !invite.recipient)
+        throw fail(409, "This invitation has already closed.");
+      const conversation = await authorizePlayPair(
+        req.userId!,
+        String(invite.recipient),
       );
-      if (!changed) throw fail(409, "This invitation has already closed.");
-      await GamePlayRequest.updateMany(
-        { invitation: changed._id, status: "pending" },
-        { status: "unavailable" },
-      );
+      await assertCanSend(req.userId!, conversation);
+      await mongoose.connection.transaction(async (transaction) => {
+        const changed = await GameInvitation.findOneAndUpdate(
+          { _id: invite._id, status: "open" },
+          { status: "cancelled" },
+          { session: transaction },
+        );
+        if (!changed) throw fail(409, "This invitation has already closed.");
+        await gameMessage(
+          req.userId!,
+          conversation._id,
+          "cancelled",
+          `play-response:${invite._id}`,
+          "I cancelled this game invitation. We can play another time.",
+          invite._id,
+          undefined,
+          transaction,
+        );
+      });
+      chatEvents.emit("changed", String(conversation._id));
       res.status(204).end();
     },
   );
   router.post(
-    "/invitations/:id/requests",
-    write,
-    async (req: AuthedRequest, res) => {
-      const invite = await visibleInvitation(req.userId!, req.params.id);
-      if (String(invite.host) === req.userId)
-        throw fail(400, "Choose a match's invitation.");
-      if (invite.status !== "open" || invite.expiresAt <= new Date())
-        throw fail(409, "This invitation is no longer available.");
-      const connection = await authorizePlayPair(
-        req.userId!,
-        String(invite.host),
-      );
-      void connection;
-      let request;
-      try {
-        request = await GamePlayRequest.create({
-          invitation: invite._id,
-          user: req.userId,
-        });
-      } catch (e) {
-        if ((e as { code?: number }).code === 11000)
-          throw fail(409, "You already requested this game.");
-        throw e;
-      }
-      // A concurrent accept/cancel cannot leave a usable late request behind.
-      if (
-        !(await GameInvitation.exists({
-          _id: invite._id,
-          status: "open",
-          expiresAt: { $gt: new Date() },
-        }))
-      ) {
-        await GamePlayRequest.updateOne(
-          { _id: request._id },
-          { status: "unavailable" },
-        );
-        throw fail(409, "This invitation just closed.");
-      }
-      await notifyPlay(
-        req.userId!,
-        String(invite.host),
-        "game_request",
-        `game-request:${request._id}`,
-        invite._id,
-      );
-      res.status(201).json({ data: { id: String(request._id) } });
-    },
-  );
-  router.post(
-    "/requests/:id/:action",
+    "/invitations/:id/:action",
     write,
     async (req: AuthedRequest, res) => {
       const action = z.enum(["accept", "decline"]).parse(req.params.action);
-      const request = await GamePlayRequest.findOne({
+      const invite = await GameInvitation.findOne({
         _id: playId(req.params.id),
-        status: "pending",
+        recipient: req.userId,
       });
-      const invite = request
-        ? await GameInvitation.findOne({
-            _id: request.invitation,
-            host: req.userId,
-            status: "open",
-            expiresAt: { $gt: new Date() },
-          })
-        : null;
-      if (!request || !invite)
-        throw fail(409, "This play request is no longer available.");
+      if (!invite) throw fail(404, "Invitation unavailable.");
       const conversation = await authorizePlayPair(
         req.userId!,
-        String(request.user),
+        String(invite.host),
       );
-      if (invite.recipient && String(invite.recipient) !== String(request.user))
-        throw fail(404, "Request unavailable.");
-      if (action === "decline") {
-        const declined = await GamePlayRequest.findOneAndUpdate(
-          { _id: request._id, status: "pending" },
-          { status: "declined" },
-        );
-        if (!declined) throw fail(409, "This request has already changed.");
-        await notifyPlay(
-          req.userId!,
-          String(request.user),
-          "game_declined",
-          `game-declined:${request._id}`,
-          invite._id,
-        );
-        res.json({ data: { status: "declined" } });
-        return;
-      }
+      await assertCanSend(req.userId!, conversation);
+      if (invite.status === "accepted" && action === "accept" && invite.session)
+        return void res.json({ data: { sessionId: String(invite.session) } });
+      if (invite.status !== "open")
+        throw fail(409, "This invitation has already closed.");
       const definition = await playDefinition();
-      if (!definition.active) throw fail(409, "This game is currently paused.");
-      const questions = await selectQuestions(
-        [req.userId!, String(request.user)],
-        definition.questionsPerCategory,
-      );
-      let sessionId = "";
-      await mongoose.connection.transaction(async (session) => {
-        const claimed = await GameInvitation.findOneAndUpdate(
-          { _id: invite._id, status: "open", expiresAt: { $gt: new Date() } },
-          { status: "accepted", acceptedRequest: request._id },
-          { session },
-        );
-        const claimedRequest = claimed
-          ? await GamePlayRequest.findOneAndUpdate(
-              { _id: request._id, status: "pending" },
-              { status: "accepted" },
-              { session },
+      if (action === "accept" && !definition.active)
+        throw fail(409, "This game is currently paused.");
+      const questions =
+        action === "accept"
+          ? await selectQuestions(
+              [String(invite.host), req.userId!],
+              definition.questionsPerCategory,
             )
-          : null;
-        if (!claimed || !claimedRequest)
-          throw fail(
-            409,
-            "Another request was accepted or the invitation closed.",
-          );
-        const [game] = await GameSession.create(
-          [
-            {
-              invitation: invite._id,
-              players: [invite.host, request.user],
+          : [];
+      let sessionId: string | null = null;
+      await mongoose.connection.transaction(async (transaction) => {
+        const claimed = await GameInvitation.findOneAndUpdate(
+          { _id: invite._id, status: "open" },
+          { status: action === "accept" ? "accepted" : "declined" },
+          { session: transaction },
+        );
+        if (!claimed) throw fail(409, "This invitation has already changed.");
+        if (action === "accept") {
+          if (
+            await GameSession.exists({
               conversation: conversation._id,
-              questions,
-              inactivityMinutes: definition.inactivityMinutes,
-            },
-          ],
-          { session },
-        );
-        sessionId = String(game!._id);
-        await GameInvitation.updateOne(
-          { _id: invite._id },
-          { session: game!._id },
-          { session },
-        );
-        await GamePlayRequest.updateMany(
-          { invitation: invite._id, status: "pending" },
-          { status: "unavailable" },
-          { session },
+              status: { $in: ["waiting", "playing"] },
+            }).session(transaction)
+          )
+            throw fail(409, "This chat already has an unfinished game.");
+          const [game] = await GameSession.create(
+            [
+              {
+                invitation: invite._id,
+                players: [invite.host, req.userId],
+                conversation: conversation._id,
+                questions,
+                status: "playing",
+                startsAt: new Date(),
+              },
+            ],
+            { session: transaction },
+          );
+          sessionId = String(game!._id);
+          await GameInvitation.updateOne(
+            { _id: invite._id },
+            { session: game!._id },
+            { session: transaction },
+          );
+        }
+        await gameMessage(
+          req.userId!,
+          conversation._id,
+          action === "accept" ? "accepted" : "declined",
+          `play-response:${invite._id}`,
+          action === "accept"
+            ? "I accepted your This or That invitation. Answer the first question anytime!"
+            : "I declined this game invitation. We can keep chatting!",
+          invite._id,
+          sessionId,
+          transaction,
         );
       });
-      await notifyPlay(
-        req.userId!,
-        String(request.user),
-        "game_accepted",
-        `game-accepted:${invite._id}`,
-        invite._id,
-        sessionId,
-      );
-      res.json({ data: { sessionId } });
+      chatEvents.emit("changed", String(conversation._id));
+      res.json({
+        data: {
+          status: action === "accept" ? "accepted" : "declined",
+          sessionId,
+        },
+      });
     },
   );
   router.get("/sessions", async (req: AuthedRequest, res) => {
@@ -852,7 +815,6 @@ export function playRouter() {
       const existing = await GameInvitation.findOne({
         rematchOf: session._id,
         status: "open",
-        expiresAt: { $gt: new Date() },
       });
       if (existing) {
         res.json({ data: await invitationDto(existing, req.userId!) });
@@ -862,7 +824,7 @@ export function playRouter() {
         {
           rematchOf: session._id,
           status: "open",
-          expiresAt: { $lte: new Date() },
+          expiresAt: { $ne: null, $lte: new Date() },
         },
         { status: "expired" },
       );

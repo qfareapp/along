@@ -54,6 +54,7 @@ import {
 import { formatMonthYear } from "../components/profile";
 import { colors as c } from "../theme";
 import { useAppLayout } from "../components/layout";
+import { ChatPlay, ChatPlayButton } from "./ChatPlay";
 import { useMomentTray } from "../services/social";
 
 export function LiveChatList() {
@@ -233,6 +234,7 @@ export function LiveConversation({ id }: { id?: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [options, setOptions] = useState(false);
+  const [playOpen, setPlayOpen] = useState(false);
   const [confirmUnmatch, setConfirmUnmatch] = useState(false);
   const [attachMenu, setAttachMenu] = useState(false);
   const [pending, setPending] = useState<OutgoingAttachment | null>(null);
@@ -423,10 +425,10 @@ export function LiveConversation({ id }: { id?: string }) {
               </Text>
             </View>
           </Pressable>
-          <IconButton
-            icon="game-controller-outline"
-            label="Play Together"
-            onPress={() => router.push(`/play?conversation=${data.id}`)}
+          <ChatPlayButton
+            conversationId={data.id}
+            open={playOpen}
+            onToggle={() => setPlayOpen(!playOpen)}
           />
           <IconButton
             icon="ellipsis-horizontal"
@@ -689,6 +691,14 @@ export function LiveConversation({ id }: { id?: string }) {
               ))}
             </>
           )}
+          <ChatPlay
+            conversationId={data.id}
+            canSend={data.canSend}
+            name={member.name}
+            open={playOpen}
+            onOpen={() => setPlayOpen(true)}
+            onClose={() => setPlayOpen(false)}
+          />
         </ScrollView>
         {!!error && (
           <Text accessibilityRole="alert" style={s.error}>

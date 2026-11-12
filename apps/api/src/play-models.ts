@@ -42,6 +42,7 @@ export const GameQuestion = mongoose.model(
 const invitation = new Schema(
   {
     host: ref("User"),
+    conversation: { type: Schema.Types.ObjectId, ref: "Conversation" },
     recipient: { type: Schema.Types.ObjectId, ref: "User" },
     caption: {
       type: String,
@@ -50,10 +51,10 @@ const invitation = new Schema(
     },
     status: {
       type: String,
-      enum: ["open", "accepted", "cancelled", "expired"],
+      enum: ["open", "accepted", "declined", "cancelled", "expired"],
       default: "open",
     },
-    expiresAt: { type: Date, required: true },
+    expiresAt: { type: Date, default: null },
     session: { type: Schema.Types.ObjectId, ref: "GameSession" },
     acceptedRequest: { type: Schema.Types.ObjectId, ref: "GamePlayRequest" },
     rematchOf: { type: Schema.Types.ObjectId, ref: "GameSession" },
@@ -61,6 +62,16 @@ const invitation = new Schema(
   { timestamps: true },
 );
 invitation.index({ host: 1, status: 1, expiresAt: 1 });
+invitation.index(
+  { conversation: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      conversation: { $type: "objectId" },
+      status: "open",
+    },
+  },
+);
 invitation.index(
   { rematchOf: 1 },
   {

@@ -336,11 +336,16 @@ const messageSchema = new Schema(
     },
     socialMoment: { type: Schema.Types.ObjectId, ref: "SocialMoment" },
     socialKind: { type: String, enum: ["reply", "share"] },
+    gameInvitation: { type: Schema.Types.ObjectId, ref: "GameInvitation" },
+    gameSession: { type: Schema.Types.ObjectId, ref: "GameSession" },
+    gameEvent: String,
+    gameEventKey: String,
     readAt: Date,
   },
   { timestamps: true },
 );
 messageSchema.index({ conversation: 1, _id: -1 });
+messageSchema.index({ gameEventKey: 1 }, { unique: true, sparse: true });
 messageSchema.index({ socialMoment: 1, createdAt: -1 }, { sparse: true });
 export const Message = mongoose.model("Message", messageSchema);
 const blockSchema = new Schema(

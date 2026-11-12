@@ -154,6 +154,9 @@ const serialize = (
     text?: string | null;
     createdAt?: Date;
     readAt?: Date | null;
+    gameInvitation?: unknown;
+    gameSession?: unknown;
+    gameEvent?: string | null;
     attachment?: {
       kind?: string | null;
       name?: string | null;
@@ -168,6 +171,9 @@ const serialize = (
   own: String(m.sender) === userId,
   createdAt: m.createdAt,
   readAt: m.readAt ?? null,
+  gameInvitationId: m.gameInvitation ? String(m.gameInvitation) : null,
+  gameSessionId: m.gameSession ? String(m.gameSession) : null,
+  gameEvent: m.gameEvent ?? null,
   socialMomentId:
     "socialMoment" in m && m.socialMoment ? String(m.socialMoment) : null,
   attachment: m.attachment?.kind
@@ -231,7 +237,7 @@ const cleanName = (name: string) =>
     .slice(-120) || "attachment";
 
 /** Throws unless the caller may send in this conversation right now. */
-async function assertCanSend(
+export async function assertCanSend(
   userId: string,
   conversation: { _id: unknown; firstSender?: unknown },
 ) {

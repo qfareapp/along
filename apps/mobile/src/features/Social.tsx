@@ -51,7 +51,6 @@ import { colors as c } from "../theme";
 import { useAppLayout } from "../components/layout";
 import { timeAgo } from "./Likes";
 import { PeoplePlanCard } from "./PlanComponents";
-import { PlayTogetherCard } from "./AlongPlay";
 
 const themes = {
   teal: ["#174F54", "#326B69"],
@@ -114,7 +113,6 @@ function SocialHome() {
   >(null);
   const tray = useMomentTray(feedScope);
   const notifications = useSocialNotifications();
-  const settings = useSocialQuery<SocialSettings>("settings");
   const invitations = useSocialQuery<Invitation[]>("invitations");
   const feed = useInfiniteQuery({
     queryKey: ["social", "feed", "mixed", feedScope],
@@ -292,9 +290,6 @@ function SocialHome() {
               ))}
             </ScrollView>
 
-            {feedScope === "matches" && settings.data?.enabled !== false && (
-              <PlayTogetherCard />
-            )}
             {!!pendingInvites && (
               <Pressable
                 accessibilityRole="button"
@@ -638,15 +633,6 @@ function SocialHome() {
                 />
               </View>
               <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
-                <Button
-                  icon="game-controller"
-                  onPress={() => {
-                    setComposerOpen(false);
-                    router.push("/play");
-                  }}
-                >
-                  Play Together
-                </Button>
                 <LinearGradient
                   colors={["#1A6065", c.tealDark]}
                   start={{ x: 0, y: 0 }}

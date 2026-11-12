@@ -1189,6 +1189,7 @@ export function socialRouter() {
     const scope = await socialScope(req.userId!);
     const rows = await SocialNotification.find({
       recipient: req.userId,
+      kind: { $not: /^game_/ },
       actor: {
         $in: [...new Set([...scope.connections, ...scope.discoverAuthors])],
       },
