@@ -424,6 +424,11 @@ export function LiveConversation({ id }: { id?: string }) {
             </View>
           </Pressable>
           <IconButton
+            icon="game-controller-outline"
+            label="Play Together"
+            onPress={() => router.push(`/play?conversation=${data.id}`)}
+          />
+          <IconButton
             icon="ellipsis-horizontal"
             label="Conversation options"
             onPress={() => {

@@ -306,6 +306,18 @@ function Celebration({ match }: { match: CelebratedMatch }) {
               <Button variant="outline" onPress={hide}>
                 Keep Exploring
               </Button>
+              {!demoMode && match.conversationId && (
+                <Button
+                  variant="outline"
+                  icon="game-controller-outline"
+                  onPress={() => {
+                    hide();
+                    router.push(`/play?conversation=${match.conversationId}`);
+                  }}
+                >
+                  Break the Ice
+                </Button>
+              )}
             </View>
           </LinearGradient>
         </Animated.View>

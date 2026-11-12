@@ -41,6 +41,8 @@ export type SocialNotification = {
   kind: string;
   momentId: string | null;
   invitationId: string | null;
+  gameInvitationId?: string | null;
+  gameSessionId?: string | null;
   readAt: string | null;
   createdAt: string;
 };

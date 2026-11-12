@@ -54,19 +54,7 @@ export async function authenticate(
   try {
     const raw = req.headers.authorization;
     if (!raw?.startsWith("Bearer ")) throw new Error();
-    const payload = jwt.verify(raw.slice(7), config.JWT_SECRET, {
-      algorithms: ["HS256"],
-      issuer: "along",
-      audience: "along-mobile",
-    });
-    if (typeof payload === "string" || !payload.sub) throw new Error();
-    const user = await User.findOne({
-      _id: payload.sub,
-      status: "active",
-      adminRole: null,
-    });
-    if (!user || (payload.sv ?? 0) !== (user.sessionVersion ?? 0))
-      throw new Error();
+    const user = await verifyMemberToken(raw.slice(7));
     if (!user.lastActiveAt || Date.now() - user.lastActiveAt.getTime() > 60000)
       await User.updateOne({ _id: user._id }, { lastActiveAt: new Date() });
     req.userId = String(user._id);
@@ -76,4 +64,22 @@ export async function authenticate(
       error: { code: "UNAUTHORIZED", message: "Please sign in again." },
     });
   }
+}
+/** Shared by HTTP and game sockets; revoked sessions are checked on every event. */
+export async function verifyMemberToken(token: string) {
+  if (!config.JWT_SECRET) throw new Error("Authentication unavailable.");
+  const payload = jwt.verify(token, config.JWT_SECRET, {
+    algorithms: ["HS256"],
+    issuer: "along",
+    audience: "along-mobile",
+  });
+  if (typeof payload === "string" || !payload.sub) throw new Error();
+  const user = await User.findOne({
+    _id: payload.sub,
+    status: "active",
+    adminRole: null,
+  });
+  if (!user || (payload.sv ?? 0) !== (user.sessionVersion ?? 0))
+    throw new Error();
+  return user;
 }

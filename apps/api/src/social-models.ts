@@ -89,6 +89,8 @@ const notification = new Schema(
     actor: ref("User"),
     moment: { ...ref("SocialMoment"), required: false },
     invitation: { type: Schema.Types.ObjectId, ref: "PlanInvitation" },
+    gameInvitation: { type: Schema.Types.ObjectId, ref: "GameInvitation" },
+    gameSession: { type: Schema.Types.ObjectId, ref: "GameSession" },
     kind: {
       type: String,
       enum: [
@@ -99,6 +101,14 @@ const notification = new Schema(
         "invitation",
         "accepted",
         "changes",
+        "game_invitation",
+        "game_request",
+        "game_accepted",
+        "game_declined",
+        "game_ready",
+        "game_waiting",
+        "game_completed",
+        "game_rematch",
       ],
       required: true,
     },
@@ -115,8 +125,10 @@ export const SocialNotification = mongoose.model(
 );
 const invitation = new Schema(
   {
-    moment: ref("SocialMoment"),
+    moment: { ...ref("SocialMoment"), required: false },
+    gameSession: { type: Schema.Types.ObjectId, ref: "GameSession" },
     proposer: ref("User"),
+    requestKey: { type: String },
     recipient: ref("User"),
     title: { type: String, required: true, maxlength: 100 },
     category: { type: String, required: true },
@@ -134,4 +146,5 @@ const invitation = new Schema(
 );
 invitation.index({ recipient: 1, _id: -1 });
 invitation.index({ proposer: 1, _id: -1 });
+invitation.index({ requestKey: 1 }, { unique: true, sparse: true });
 export const PlanInvitation = mongoose.model("PlanInvitation", invitation);

@@ -1228,6 +1228,8 @@ export function socialRouter() {
         kind: n.kind,
         momentId: n.moment ? String(n.moment) : null,
         invitationId: n.invitation ? String(n.invitation) : null,
+        gameInvitationId: n.gameInvitation ? String(n.gameInvitation) : null,
+        gameSessionId: n.gameSession ? String(n.gameSession) : null,
         readAt: n.readAt ?? null,
         createdAt: n.createdAt,
       });

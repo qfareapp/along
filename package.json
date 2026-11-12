@@ -22,6 +22,7 @@
     "qa:plans": "node tools/plans-qa.mjs",
     "qa:tablet": "node tools/plans-qa.mjs --tablet",
     "qa:social": "node tools/social-qa.mjs",
+    "qa:play": "node tools/play-qa.mjs",
     "test": "npm --prefix apps/api test",
     "test:uploads": "node apps/api/node_modules/tsx/dist/cli.mjs --test tools/native-upload.test.ts"
   },

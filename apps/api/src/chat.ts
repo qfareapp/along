@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import multer, { MulterError } from "multer";
 import { compressPhoto } from "./compress-photo.js";
 import { rateLimit } from "express-rate-limit";
+import { chatEvents } from "./chat-events.js";
 import { authenticate, type AuthedRequest } from "./auth.js";
 import { config } from "./config.js";
 import {
@@ -120,7 +121,7 @@ async function mainPhotos(userIds: string[]) {
 }
 
 /** Loads a conversation the caller may use, or throws 404. */
-async function openConversation(userId: string, id: string) {
+export async function openConversation(userId: string, id: string) {
   if (!mongoose.isObjectIdOrHexString(id))
     throw fail(404, "Conversation unavailable.");
   const conversation = await Conversation.findById(id).lean();
@@ -437,6 +438,7 @@ export function chatRouter() {
       { $set: { updatedAt: new Date() } },
     );
     res.status(201).json({ data: serialize(message.toObject(), userId) });
+    chatEvents.emit("changed", String(conversation._id));
   });
 
   router.post(
@@ -513,6 +515,7 @@ export function chatRouter() {
         { $set: { updatedAt: new Date() } },
       );
       res.status(201).json({ data: serialize(message.toObject(), userId) });
+      chatEvents.emit("changed", String(conversation._id));
     },
   );
 

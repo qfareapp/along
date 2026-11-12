@@ -3,6 +3,8 @@ import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { initializeCategories } from "./categories.js";
 import { cleanupSocial } from "./social.js";
+import { initializePlay } from "./play-bank.js";
+import { attachPlaySockets } from "./play-sockets.js";
 import { setTimeout as delay } from "node:timers/promises";
 
 mongoose.set("bufferCommands", false);
@@ -26,6 +28,7 @@ async function connectDatabase() {
       }
       console.log("MongoDB connected");
       await initializeCategories();
+      await initializePlay();
       return;
     } catch {
       if (shutdownController.signal.aborted) return;
@@ -44,6 +47,7 @@ async function connectDatabase() {
 const server = createApp().listen(config.PORT, "0.0.0.0", () =>
   console.log(`Along API listening on port ${config.PORT}`),
 );
+const playSockets = attachPlaySockets(server);
 void connectDatabase();
 let cleaningSocial = false;
 const socialCleanup = setInterval(() => {
@@ -59,12 +63,12 @@ const socialCleanup = setInterval(() => {
   }
 }, 60000);
 socialCleanup.unref();
-function shutdown() {
+async function shutdown() {
   clearInterval(socialCleanup);
   shutdownController.abort();
-  server.close(() => {
-    void mongoose.disconnect().then(() => process.exit(0));
-  });
+  await playSockets.close();
+  await mongoose.disconnect();
+  process.exit(0);
 }
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
+process.on("SIGTERM", () => void shutdown());
+process.on("SIGINT", () => void shutdown());

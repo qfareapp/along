@@ -12,6 +12,7 @@ import { discoveryRouter } from "./discovery.js";
 import { chatRouter, pairKey } from "./chat.js";
 import { notificationsRouter } from "./notifications.js";
 import { socialRouter } from "./social.js";
+import { playRouter } from "./play.js";
 import { preparePlanAudience } from "./plan-audience.js";
 import { activitiesRouter, activityScope } from "./activities.js";
 import {
@@ -109,6 +110,7 @@ export function createApp() {
   app.use("/api/v1/conversations", chatRouter());
   app.use("/api/v1/notifications", notificationsRouter());
   app.use("/api/v1/social", socialRouter());
+  app.use("/api/v1/games", playRouter());
   app.use("/api/v1/activities", activitiesRouter());
   const onboarding = onboardingRouter();
   app.use("/api/v1", (req, res, next) => {

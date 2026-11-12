@@ -20,6 +20,7 @@ import {
   ChevronRight,
   ArrowUpRight,
   HeartHandshake,
+  Gamepad2,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Session } from "@/lib/types";
@@ -40,6 +41,7 @@ const navigation = [
   ["Social Moderation", "/social", ShieldCheck, "reports.review"],
   ["Categories", "/categories", Shapes, "categories.manage"],
   ["Matching rules", "/matching", HeartHandshake, "matching.configure"],
+  ["Along Play", "/along-play", Gamepad2, "settings.manage"],
   ["Admin roles", "/admin-roles", Users, "admins.manage"],
   ["Audit trail", "/audit-logs", ScrollText, "audit.read"],
   ["System health", "/system-health", SlidersHorizontal, "system.read"],

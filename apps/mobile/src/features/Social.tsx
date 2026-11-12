@@ -51,6 +51,7 @@ import { colors as c } from "../theme";
 import { useAppLayout } from "../components/layout";
 import { timeAgo } from "./Likes";
 import { PeoplePlanCard } from "./PlanComponents";
+import { PlayTogetherCard } from "./AlongPlay";
 
 const themes = {
   teal: ["#174F54", "#326B69"],
@@ -113,6 +114,7 @@ function SocialHome() {
   >(null);
   const tray = useMomentTray(feedScope);
   const notifications = useSocialNotifications();
+  const settings = useSocialQuery<SocialSettings>("settings");
   const invitations = useSocialQuery<Invitation[]>("invitations");
   const feed = useInfiniteQuery({
     queryKey: ["social", "feed", "mixed", feedScope],
@@ -290,6 +292,9 @@ function SocialHome() {
               ))}
             </ScrollView>
 
+            {feedScope === "matches" && settings.data?.enabled !== false && (
+              <PlayTogetherCard />
+            )}
             {!!pendingInvites && (
               <Pressable
                 accessibilityRole="button"
@@ -633,6 +638,15 @@ function SocialHome() {
                 />
               </View>
               <ScrollView bounces={false} showsVerticalScrollIndicator={false}>
+                <Button
+                  icon="game-controller"
+                  onPress={() => {
+                    setComposerOpen(false);
+                    router.push("/play");
+                  }}
+                >
+                  Play Together
+                </Button>
                 <LinearGradient
                   colors={["#1A6065", c.tealDark]}
                   start={{ x: 0, y: 0 }}
@@ -2008,6 +2022,15 @@ export function SocialUpdates() {
     invitation: "You have a private plan invitation.",
     accepted: "Your private plan was accepted.",
     changes: "Your match suggested changes to a plan.",
+    game_invitation: "Invited you to play This or That.",
+    game_request: "Wants to play This or That with you.",
+    game_accepted: "Your play request was accepted. Get ready!",
+    game_declined:
+      "Your play request was declined. You can try another invitation.",
+    game_ready: "Your match is ready to play.",
+    game_waiting: "Your match is waiting in your game.",
+    game_completed: "Your Vibe Match is ready to reveal.",
+    game_rematch: "Invited you for another round of This or That.",
   };
   return (
     <Screen
@@ -2040,9 +2063,13 @@ export function SocialUpdates() {
               }),
             );
             router.push(
-              n.invitationId
-                ? "/social-invitations"
-                : `/moment?id=${n.momentId}`,
+              n.gameSessionId
+                ? `/play/this-or-that/${n.gameSessionId}`
+                : n.gameInvitationId
+                  ? "/play"
+                  : n.invitationId
+                    ? "/social-invitations"
+                    : `/moment?id=${n.momentId}`,
             );
           }}
           style={[

@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.qfareapp.along",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#FFF8F2",
         "foregroundImage": "./assets/android-icon-foreground.png",

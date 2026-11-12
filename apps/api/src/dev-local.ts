@@ -57,12 +57,13 @@ const server = createApp().listen(port, "127.0.0.1", () => {
     "Bound to loopback. Use a configured MongoDB and npm run dev for physical-phone LAN access.",
   );
 });
+const { attachPlaySockets } = await import("./play-sockets.js");
+const playSockets = attachPlaySockets(server);
 async function shutdown() {
-  server.close(async () => {
-    await mongoose.disconnect();
-    await database.stop();
-    process.exit(0);
-  });
+  await playSockets.close();
+  await mongoose.disconnect();
+  await database.stop();
+  process.exit(0);
 }
 process.on("SIGINT", () => {
   void shutdown();

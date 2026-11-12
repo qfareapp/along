@@ -288,6 +288,7 @@ export function Button({
     <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled: disabled || loading }}
+      accessibilityLabel={typeof children === "string" ? children : undefined}
       disabled={disabled || loading}
       onPress={onPress}
       style={({ pressed }) => [
