@@ -257,6 +257,7 @@ export const activitySchema = new Schema(
     },
     capacity: { type: Number, min: 1, max: 100 },
     participants: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    groupChatRevision: { type: Number, default: 0, select: false },
     zone: { type: String, required: true },
     startsAt: { type: Date, required: true },
     recurring: { type: Boolean, default: false },

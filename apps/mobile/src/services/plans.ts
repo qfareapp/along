@@ -128,6 +128,8 @@ export function useRefreshPlans() {
         "activity",
         "activity-notifications",
         "conversations",
+        "plan-groups",
+        "plan-group-for",
         "social",
       ].map((key) => client.invalidateQueries({ queryKey: [key] })),
     );

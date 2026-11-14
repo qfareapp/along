@@ -5,6 +5,23 @@ import { config } from "./config.js";
 import { RefreshSession, User } from "./models.js";
 
 export type AuthedRequest = Request & { userId?: string };
+// Share validation only within this HTTP request. A later request must check
+// account status and session revocation again, even when it uses the same JWT.
+const requestMembers = new WeakMap<
+  Request,
+  Promise<Awaited<ReturnType<typeof verifyMemberToken>> | null>
+>();
+export function requestMember(req: Request) {
+  let member = requestMembers.get(req);
+  if (!member) {
+    const raw = req.headers.authorization;
+    member = raw?.startsWith("Bearer ")
+      ? verifyMemberToken(raw.slice(7)).catch(() => null)
+      : Promise.resolve(null);
+    requestMembers.set(req, member);
+  }
+  return member;
+}
 export const digest = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
 export async function tokens(userId: string) {
@@ -52,9 +69,8 @@ export async function authenticate(
     return;
   }
   try {
-    const raw = req.headers.authorization;
-    if (!raw?.startsWith("Bearer ")) throw new Error();
-    const user = await verifyMemberToken(raw.slice(7));
+    const user = await requestMember(req);
+    if (!user) throw new Error();
     if (!user.lastActiveAt || Date.now() - user.lastActiveAt.getTime() > 60000)
       await User.updateOne({ _id: user._id }, { lastActiveAt: new Date() });
     req.userId = String(user._id);

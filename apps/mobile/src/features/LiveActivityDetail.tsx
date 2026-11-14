@@ -37,6 +37,7 @@ import DateTimeField from "../components/DateTimeField";
 import { localDate } from "../components/dateTime";
 import { PlanStatusControl, type OwnerPlanState } from "./PlanStatusControl";
 import { formatSchedule } from "./PlanSchedule";
+import { PlanGroupEntry } from "./PlanGroupEntry";
 export default function LiveActivityDetail() {
   const insets = useSafeAreaInsets();
   const { id, created } = useLocalSearchParams<{
@@ -106,7 +107,9 @@ export default function LiveActivityDetail() {
             ? "Go live"
             : "View interest requests"
       : plan.interestStatus === "accepted"
-        ? "Accepted · Open chat"
+        ? plan.activityType === "group"
+          ? "Message organiser"
+          : "Accepted · Open chat"
         : plan.interestStatus === "declined"
           ? "Declined"
           : plan.interestStatus === "pending"
@@ -494,6 +497,10 @@ export default function LiveActivityDetail() {
             </Button>
           </View>
         )}
+        {plan.activityType === "group" &&
+          (plan.isOwner || plan.interestStatus === "accepted") && (
+            <PlanGroupEntry plan={plan} />
+          )}
         {plan.isOwner && !plan.privatePlan && (
           <>
             <Text style={[sectionLabel, { marginTop: 26 }]}>Manage plan</Text>

@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Platform } from "react-native";
 import { api, apiBaseUrl, demoMode } from "./api";
 import { useCompletion } from "./onboarding";
+import { usePlanGroups } from "./planGroups";
 
 export type ChatMember = {
   id: string;
@@ -58,7 +59,11 @@ export function useConversations() {
 }
 export function useUnreadCount() {
   const { data } = useConversations();
-  return data?.reduce((sum, c) => sum + c.unread, 0) ?? 0;
+  const groups = usePlanGroups(true);
+  return (
+    (data?.reduce((sum, c) => sum + c.unread, 0) ?? 0) +
+    (groups.data?.reduce((sum, group) => sum + group.unread, 0) ?? 0)
+  );
 }
 export function useThread(id?: string) {
   return useQuery({

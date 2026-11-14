@@ -36,7 +36,14 @@ function run(args, cwd, env = process.env) {
 }
 process.on("SIGINT", stop);
 process.on("SIGTERM", stop);
-run(["node_modules/tsx/dist/cli.mjs", "src/play-local.ts"], "apps/api");
+run(
+  [
+    "node_modules/tsx/dist/cli.mjs",
+    "src/play-local.ts",
+    ...(process.argv.includes("--groups") ? ["--groups"] : []),
+  ],
+  "apps/api",
+);
 run(
   [
     "node_modules/expo/bin/cli",

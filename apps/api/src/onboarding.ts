@@ -11,6 +11,7 @@ import {
 } from "./photos.js";
 import { z } from "zod";
 import { rateLimit } from "express-rate-limit";
+import { memberRateKey, rateLimitMessage } from "./rate-limits.js";
 import { authenticate, digest, type AuthedRequest } from "./auth.js";
 import { Profile, User, ProfilePhoto, OnboardingEvent } from "./models.js";
 import { isAdult } from "./validation.js";
@@ -304,7 +305,12 @@ export function onboardingRouter() {
     },
   });
   router.use(authenticate);
-  router.use(rateLimit({ windowMs: 60000, limit: 90 }));
+  router.use(rateLimit({
+    windowMs: 60000,
+    limit: 90,
+    keyGenerator: memberRateKey,
+    message: rateLimitMessage,
+  }));
   router.get("/onboarding", async (req: AuthedRequest, res) => {
     const profile = await ensureProfile(req.userId!);
     if (!profile.onboarding?.startedAt)
@@ -619,7 +625,12 @@ export function onboardingRouter() {
   });
   router.post(
     "/auth/contact/request",
-    rateLimit({ windowMs: 60000, limit: 2 }),
+    rateLimit({
+      windowMs: 60000,
+      limit: 2,
+      keyGenerator: memberRateKey,
+      message: rateLimitMessage,
+    }),
     async (req: AuthedRequest, res) => {
       const transport = emailTransport();
       if (!transport)
@@ -666,7 +677,12 @@ export function onboardingRouter() {
   );
   router.post(
     "/auth/contact/verify",
-    rateLimit({ windowMs: 60000, limit: 10 }),
+    rateLimit({
+      windowMs: 60000,
+      limit: 10,
+      keyGenerator: memberRateKey,
+      message: rateLimitMessage,
+    }),
     async (req: AuthedRequest, res) => {
       const { code } = z
         .object({ code: z.string().regex(/^\d{6}$/) })
@@ -707,7 +723,12 @@ export function onboardingRouter() {
   );
   router.post(
     "/profile/photos",
-    rateLimit({ windowMs: 60000, limit: 10 }),
+    rateLimit({
+      windowMs: 60000,
+      limit: 10,
+      keyGenerator: memberRateKey,
+      message: rateLimitMessage,
+    }),
     express.raw({
       type: ["image/jpeg", "image/png", "image/webp"],
       limit: "5mb",

@@ -41,8 +41,8 @@ const { seedCategories } = await import("./categories.js");
 const { eligibleProfile } = await import("./test-fixtures.js");
 const { tokens } = await import("./auth.js");
 const { attachPlaySockets } = await import("./play-sockets.js");
-const app = createApp(),
-  admin = request.agent(app);
+let app = createApp();
+const admin = request.agent(app);
 let db: MongoMemoryReplSet,
   adminCsrf = "",
   adminId = "",
@@ -157,6 +157,9 @@ before(
   { timeout: 180000 },
 );
 beforeEach(async () => {
+  // Each scenario gets its own request quotas as well as fresh game state.
+  // Changing a forwarded IP must not reset an authenticated member's quota.
+  app = createApp();
   sequence++;
   await Promise.all([
     Message.deleteMany({}),

@@ -7,12 +7,14 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { MulterError } from "multer";
 import { config } from "./config.js";
+import { appRateLimits } from "./rate-limits.js";
 import { adminRouter } from "./admin/router.js";
 import { discoveryRouter } from "./discovery.js";
 import { chatRouter, pairKey } from "./chat.js";
 import { notificationsRouter } from "./notifications.js";
 import { socialRouter } from "./social.js";
 import { playRouter } from "./play.js";
+import { planGroupsRouter } from "./plan-groups.js";
 import { preparePlanAudience } from "./plan-audience.js";
 import { activitiesRouter, activityScope } from "./activities.js";
 import {
@@ -74,20 +76,7 @@ export function createApp() {
     }),
   );
   app.use(express.json({ limit: "32kb" }));
-  app.use(
-    rateLimit({
-      windowMs: 60000,
-      limit: 120,
-      message: {
-        error: {
-          code: "RATE_LIMITED",
-          message: "Too many requests. Please wait a moment and try again.",
-        },
-      },
-      standardHeaders: "draft-8",
-      legacyHeaders: false,
-    }),
-  );
+  app.use(...appRateLimits());
   app.get("/health", (_req, res) =>
     res.json({ status: "ok", service: "along-api" }),
   );
@@ -117,6 +106,7 @@ export function createApp() {
   app.use("/api/v1/notifications", notificationsRouter());
   app.use("/api/v1/social", socialRouter());
   app.use("/api/v1/games", playRouter());
+  app.use("/api/v1/plan-groups", planGroupsRouter());
   app.use("/api/v1/activities", activitiesRouter());
   const onboarding = onboardingRouter();
   app.use("/api/v1", (req, res, next) => {

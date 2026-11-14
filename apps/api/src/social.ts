@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import multer from "multer";
 import { compressPhoto } from "./compress-photo.js";
 import { rateLimit } from "express-rate-limit";
+import { memberRateKey, rateLimitMessage } from "./rate-limits.js";
 import { z } from "zod";
 import { authenticate, type AuthedRequest } from "./auth.js";
 import {
@@ -410,10 +411,17 @@ export function socialRouter() {
   const mutate = rateLimit({
     windowMs: 60000,
     limit: 35,
+    keyGenerator: memberRateKey,
+    message: rateLimitMessage,
     standardHeaders: "draft-8",
     legacyHeaders: false,
   });
-  const publishLimit = rateLimit({ windowMs: 3600000, limit: 20 });
+  const publishLimit = rateLimit({
+    windowMs: 3600000,
+    limit: 20,
+    keyGenerator: memberRateKey,
+    message: rateLimitMessage,
+  });
   router.get("/categories", async (req: AuthedRequest, res) => {
     const profile = await Profile.findOne({ user: req.userId });
     const categories = await Category.find({

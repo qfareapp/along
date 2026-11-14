@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
+import { memberRateKey } from "./rate-limits.js";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { authenticate, type AuthedRequest } from "./auth.js";
@@ -548,6 +549,7 @@ export function playRouter() {
   const write = rateLimit({
     windowMs: 60000,
     limit: 45,
+    keyGenerator: memberRateKey,
     message: {
       error: {
         code: "RATE_LIMITED",

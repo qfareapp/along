@@ -23,7 +23,9 @@
     "qa:tablet": "node tools/plans-qa.mjs --tablet",
     "qa:social": "node tools/social-qa.mjs",
     "qa:play": "node tools/play-qa.mjs",
+    "qa:groups": "node tools/play-qa.mjs --groups",
     "dev:play": "node tools/play-local.mjs",
+    "dev:groups": "node tools/play-local.mjs --groups",
     "test": "npm --prefix apps/api test",
     "test:uploads": "node apps/api/node_modules/tsx/dist/cli.mjs --test tools/native-upload.test.ts"
   },

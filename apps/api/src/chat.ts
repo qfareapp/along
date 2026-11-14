@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import multer, { MulterError } from "multer";
 import { compressPhoto } from "./compress-photo.js";
 import { rateLimit } from "express-rate-limit";
+import { memberRateKey, rateLimitMessage } from "./rate-limits.js";
 import { chatEvents } from "./chat-events.js";
 import { authenticate, type AuthedRequest } from "./auth.js";
 import { config } from "./config.js";
@@ -309,6 +310,8 @@ export function chatRouter() {
   const sendLimit = rateLimit({
     windowMs: 60000,
     limit: 40,
+    keyGenerator: memberRateKey,
+    message: rateLimitMessage,
     standardHeaders: "draft-8",
     legacyHeaders: false,
   });

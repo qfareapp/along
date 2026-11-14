@@ -56,9 +56,12 @@ import { colors as c } from "../theme";
 import { useAppLayout } from "../components/layout";
 import { ChatPlay, ChatPlayButton } from "./ChatPlay";
 import { useMomentTray } from "../services/social";
+import { PlanGroupList } from "./PlanGroupChat";
+import { usePlanGroups } from "../services/planGroups";
 
 export function LiveChatList() {
   const query = useConversations();
+  const groups = usePlanGroups();
   const moments = useMomentTray();
   const rows = query.data ?? [];
   const fresh = rows.filter((r) => !r.lastMessage);
@@ -69,6 +72,7 @@ export function LiveChatList() {
         title="Your conversations"
         subtitle="A little hello goes a long way."
       />
+      <PlanGroupList />
       {query.isPending && query.fetchStatus !== "idle" ? (
         <ActivityIndicator color={c.teal} />
       ) : query.error ? (
@@ -79,7 +83,7 @@ export function LiveChatList() {
         >
           <Button onPress={() => void query.refetch()}>Try Again</Button>
         </Empty>
-      ) : !rows.length ? (
+      ) : !rows.length && !groups.data?.length ? (
         <Empty
           icon="chatbubbles-outline"
           title="Your next hello starts here"

@@ -14,6 +14,7 @@ import {
 import { compatibleProfiles } from "./discovery.js";
 import { fail, requireReady, vibeCategories } from "./onboarding.js";
 import { ensureMatch } from "./chat.js";
+import { addAcceptedGroupMember } from "./plan-group-service.js";
 import { config } from "./config.js";
 import { socialScope } from "./social.js";
 import { planAudienceVisibility } from "./plan-audience.js";
@@ -340,6 +341,13 @@ export async function acceptActivityInterest(
         },
         { session },
       );
+      if (activity.activityType === "group")
+        await addAcceptedGroupMember(
+          activity._id,
+          String(interest.user),
+          ownerId,
+          session,
+        );
       return conversation;
     });
   } finally {
