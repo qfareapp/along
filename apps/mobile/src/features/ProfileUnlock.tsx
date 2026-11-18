@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Field, Header, Notice, Screen, text } from "../components/ui";
 import { PhotoUploader, SelectionCard } from "../components/onboarding";
@@ -92,6 +93,7 @@ function UnlockForm({ initial }: { initial: Completion }) {
           : undefined,
     };
   });
+  const [offerVibeCheck, setOfferVibeCheck] = useState(false);
   async function action(fn: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -109,6 +111,22 @@ function UnlockForm({ initial }: { initial: Completion }) {
   const data = completion.data;
   const needsBirthDate = !(
     data?.user.hasBirthDate ?? initial.user.hasBirthDate
+  );
+  if (offerVibeCheck) return (
+    <Screen width="reading">
+      <Header title="Your profile is ready" />
+      <View style={{ paddingVertical: 30, gap: 20 }}>
+        <Ionicons name="sparkles-outline" size={54} color={c.coralBright} />
+        <Text style={text.title}>Set up your Vibe Check?</Text>
+        <Text style={text.body}>
+          Pick questions, choose your private answers and set your match cutoff.
+          Shared choices can help start your next conversation.
+        </Text>
+        <Notice>This is optional. You can set it up or edit it anytime from Profile → Your Vibe Check.</Notice>
+        <Button onPress={() => router.replace("/vibe-check?onboarding=true")}>Do it now</Button>
+        <Button variant="outline" onPress={() => router.replace("/(tabs)")}>Later</Button>
+      </View>
+    </Screen>
   );
   return (
     <Screen width="reading">
@@ -442,10 +460,12 @@ function UnlockForm({ initial }: { initial: Completion }) {
                   disabled={!data.eligible}
                   onPress={() =>
                     void action(async () => {
-                      await api("/profile/activate-discovery", {
+                      const activated = await api<Completion>("/profile/activate-discovery", {
                         method: "POST",
                       });
-                      router.replace("/(tabs)");
+                      client.setQueryData(["profile-completion"], activated);
+                      if (!data.activated && edit !== "true") setOfferVibeCheck(true);
+                      else router.replace("/(tabs)");
                     })
                   }
                 >

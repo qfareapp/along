@@ -46,9 +46,11 @@ export async function authorisePlanGroup(
       }).session(session ?? null)
     : null;
   const member = group
-    ? await PlanGroupMember.findOne({ group: group._id, user: userId }).session(
-        session ?? null,
-      )
+    ? await PlanGroupMember.findOne({
+        group: group._id,
+        user: userId,
+        removedAt: null,
+      }).session(session ?? null)
     : null;
   if (!group || !activity || !member)
     throw fail(404, "Group chat unavailable.");
@@ -76,7 +78,16 @@ export async function authorisePlanGroup(
       String(String(b.user) === organiserId ? b.target : b.user),
     ),
   );
-  const roster = members.filter((u) => !excluded.has(String(u._id)));
+  const memberships = await PlanGroupMember.find({
+    group: group._id,
+    removedAt: null,
+  })
+    .session(session ?? null)
+    .distinct("user");
+  const currentMembers = new Set(memberships.map(String));
+  const roster = members.filter(
+    (u) => currentMembers.has(String(u._id)) && !excluded.has(String(u._id)),
+  );
   const isOrganiser = organiserId === userId;
   const me = roster.find((u) => String(u._id) === userId)!;
   return {
@@ -118,7 +129,7 @@ export async function appendGroupMessage(
   group: InstanceType<typeof PlanGroup>,
   sender: string,
   text: string,
-  kind: "message" | "created" | "joined" | "permissions",
+  kind: "message" | "created" | "joined" | "permissions" | "removed",
   session: mongoose.ClientSession,
   clientId?: string,
 ) {

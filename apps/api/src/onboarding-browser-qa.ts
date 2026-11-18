@@ -448,6 +448,8 @@ try {
   await page
     .getByRole("button", { name: "Activate Discovery", exact: true })
     .click();
+  await page.getByText("Set up your Vibe Check?", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Later", exact: true }).click();
   await page
     .getByRole("button", { name: "Like QA Noor", exact: true })
     .waitFor();
@@ -500,7 +502,7 @@ try {
       .getByRole("button", { name: "Keep Exploring", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "Save QA Maya's profile", exact: true })
+      .getByRole("button", { name: "Like QA Maya", exact: true })
       .click();
     const swipeCard = page.locator(
       '[data-testid="discovery-profile-card"]:visible',

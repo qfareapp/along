@@ -542,6 +542,10 @@ export function MyProfile() {
       )}
 
       {/* Vibes */}
+      {!demoMode && <Section icon="sparkles-outline" title="Your Vibe Check">
+        <Text style={text.body}>Pick your questions and private answers. Let shared choices start a conversation.</Text>
+        <Button variant="outline" onPress={() => router.push("/vibe-check")}>Set up Vibe Check</Button>
+      </Section>}
       <Section
         icon="sparkles-outline"
         title="Your vibes"

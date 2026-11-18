@@ -59,7 +59,7 @@ export const socialDefaults = {
   archive: true,
   notifications: true,
 };
-export async function socialScope(userId: string) {
+export async function socialScope(userId: string, includePlanAuthors = false) {
   const [ready, matches, blocks, stored] = await Promise.all([
     discoveryUserIds(),
     Match.find({ users: userId, active: true }).lean(),
@@ -74,6 +74,12 @@ export async function socialScope(userId: string) {
   const potential = matches
     .flatMap((m) => m.users.filter((u) => String(u) !== userId).map(String))
     .filter((u) => readyIds.has(u) && !blocked.has(u));
+  // Public plans have their own audience. Dating compatibility only controls
+  // Discover status updates, and must not remove eligible plan organisers.
+  const planCandidates =
+    includePlanAuthors && readyIds.has(userId) && settings.enabled
+      ? [...readyIds].filter((u) => u !== userId && !blocked.has(u))
+      : [];
   let discoverCandidates: string[] = [];
   if (readyIds.has(userId) && settings.enabled) {
     const { viewer, mutualFilter } = await compatibleProfiles(userId);
@@ -94,7 +100,9 @@ export async function socialScope(userId: string) {
     }
   }
   const theirSettings = await SocialSettings.find({
-    user: { $in: [...new Set([...potential, ...discoverCandidates])] },
+    user: {
+      $in: [...new Set([...potential, ...discoverCandidates, ...planCandidates])],
+    },
   }).lean();
   const byUser = new Map(theirSettings.map((s) => [String(s.user), s]));
   const eligibleConnections = readyIds.has(userId)
@@ -106,6 +114,7 @@ export async function socialScope(userId: string) {
     settings,
     connections,
     eligibleConnections,
+    planAuthors: planCandidates.filter((u) => byUser.get(u)?.enabled !== false),
     discoverAuthors: discoverCandidates.filter(
       (u) => byUser.get(u)?.enabled !== false,
     ),
@@ -512,7 +521,10 @@ export function socialRouter() {
         includePlans: z.enum(["true", "false"]).default("false"),
       })
       .parse(req.query);
-    const scope = await socialScope(req.userId!);
+    const scope = await socialScope(
+      req.userId!,
+      query.includePlans === "true" && query.scope === "discover",
+    );
     const rows = await SocialMoment.find({
       ...(await visibleFilter(scope, query.scope)),
       ...(query.author ? { author: id(query.author) } : {}),
@@ -526,7 +538,7 @@ export function socialRouter() {
         scope.userId,
         ...(query.scope === "matches"
           ? scope.connections
-          : scope.discoverAuthors
+          : scope.planAuthors
         ).filter(
           (author) =>
             !includes(scope.settings.muted, author) &&

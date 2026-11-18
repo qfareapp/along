@@ -48,6 +48,8 @@ type MemberPhotoProps = {
   path?: string;
   resizeMode?: "cover" | "contain";
   style: StyleProp<ImageStyle>;
+  /** Reports the loaded photo's width / height so callers can size to it. */
+  onAspectRatio?: (ratio: number) => void;
 };
 export function MemberPhoto(props: MemberPhotoProps) {
   return <PrivateMemberPhoto key={props.path ?? props.id} {...props} />;
@@ -57,6 +59,7 @@ function PrivateMemberPhoto({
   path,
   style,
   resizeMode = "cover",
+  onAspectRatio,
 }: MemberPhotoProps) {
   const [source, setSource] = useState<ImageSourcePropType | null>(null),
     [failed, setFailed] = useState(false),
@@ -107,6 +110,21 @@ function PrivateMemberPhoto({
           resizeMode={resizeMode}
           testID="member-photo"
           onError={() => setFailed(true)}
+          onLoad={(event) => {
+            if (!onAspectRatio) return;
+            const loaded = event.nativeEvent.source;
+            if (loaded?.width && loaded?.height)
+              onAspectRatio(loaded.width / loaded.height);
+            else if (
+              source &&
+              typeof source === "object" &&
+              "uri" in source &&
+              source.uri
+            )
+              Image.getSize(source.uri, (width, height) => {
+                if (width && height) onAspectRatio(width / height);
+              });
+          }}
           style={{ width: "100%", height: "100%" }}
         />
       ) : (
@@ -229,177 +247,320 @@ function ProfileCard({
   });
   return (
     <View style={{ marginBottom: 42 }}>
-      <Animated.View
-        testID="discovery-profile-card"
-        {...pan.panHandlers}
-        style={{
-          transform: [
-            { translateX: x },
-            {
-              rotate: reduced
-                ? "0deg"
-                : x.interpolate({
-                    inputRange: [-240, 0, 240],
-                    outputRange: ["-9deg", "0deg", "9deg"],
-                  }),
-            },
-          ],
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`View ${member.name}'s profile`}
-          disabled={busy}
-          onPress={() => router.push(`/person?id=${member.id}`)}
+      <View>
+        <Animated.View
+          testID="discovery-profile-card"
+          {...pan.panHandlers}
           style={{
-            height: layout.isTablet
-              ? Math.max(340, Math.min(640, layout.height - 280))
-              : 505,
-            borderRadius: 23,
-            overflow: "hidden",
-            backgroundColor: c.peach,
+            transform: [
+              { translateX: x },
+              {
+                rotate: reduced
+                  ? "0deg"
+                  : x.interpolate({
+                      inputRange: [-240, 0, 240],
+                      outputRange: ["-9deg", "0deg", "9deg"],
+                    }),
+              },
+            ],
           }}
         >
-          <MemberPhoto
-            key={member.photoIds[0]}
-            id={member.photoIds[0]}
-            style={{ position: "absolute", width: "100%", height: "100%" }}
-          />
-          <LinearGradient
-            pointerEvents="box-none"
-            colors={["transparent", "#09262500", "#16251AEF"]}
-            locations={[0, 0.35, 1]}
-            style={{ flex: 1, justifyContent: "space-between", padding: 20 }}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${member.name}'s profile`}
+            disabled={busy}
+            onPress={() => router.push(`/person?id=${member.id}`)}
+            style={{
+              height: layout.isTablet
+                ? Math.max(340, Math.min(640, layout.height - 280))
+                : 505,
+              borderRadius: 23,
+              overflow: "hidden",
+              backgroundColor: c.peach,
+            }}
           >
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              {member.likedYou && (
-                <View style={[cardPill, { backgroundColor: c.coralBright }]}>
-                  <Ionicons name="heart" size={12} color={c.white} />
-                  <Text style={cardPillText}>Liked you</Text>
-                </View>
-              )}
-              {member.mutualMatch ? (
-                <View style={[cardPill, { backgroundColor: c.teal }]}>
-                  <Ionicons name="heart" size={12} color={c.coralBright} />
-                  <Text style={cardPillText}>Mutual match</Text>
-                </View>
-              ) : (
-                <View
-                  style={[
-                    cardPill,
-                    {
-                      backgroundColor: "#093E4399",
-                      borderWidth: 1,
-                      borderColor: "#FFFFFF55",
-                    },
-                  ]}
-                >
-                  <Ionicons name="sparkles" size={12} color={c.peach} />
-                  <Text style={cardPillText}>Open to meeting you</Text>
-                </View>
-              )}
-              <View style={[cardPill, { backgroundColor: c.coralBright }]}>
-                <Text style={cardPillText}>
-                  {VIBES.find((v) => v.id === member.vibes[0])?.label ??
-                    "Shared experiences"}
-                </Text>
-              </View>
-            </View>
-            <View style={{ paddingBottom: 30, gap: 11 }}>
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 7 }}
-              >
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    color: "white",
-                    fontWeight: "700",
-                    fontSize: 28,
-                    flexShrink: 1,
-                  }}
-                >
-                  {member.name}, {member.age}
-                </Text>
-                {member.identityVerified && (
-                  <Ionicons name="checkmark-circle" color="#26A4F7" size={21} />
+            <MemberPhoto
+              key={member.photoIds[0]}
+              id={member.photoIds[0]}
+              style={{ position: "absolute", width: "100%", height: "100%" }}
+            />
+            <LinearGradient
+              pointerEvents="box-none"
+              colors={["transparent", "#09262500", "#16251AEF"]}
+              locations={[0, 0.35, 1]}
+              style={{ flex: 1, justifyContent: "space-between", padding: 20 }}
+            >
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {member.likedYou && (
+                  <View style={[cardPill, { backgroundColor: c.coralBright }]}>
+                    <Ionicons name="heart" size={12} color={c.white} />
+                    <Text style={cardPillText}>Liked you</Text>
+                  </View>
                 )}
+                {member.mutualMatch ? (
+                  <View style={[cardPill, { backgroundColor: c.teal }]}>
+                    <Ionicons name="heart" size={12} color={c.coralBright} />
+                    <Text style={cardPillText}>Mutual match</Text>
+                  </View>
+                ) : (
+                  <View
+                    style={[
+                      cardPill,
+                      {
+                        backgroundColor: "#093E4399",
+                        borderWidth: 1,
+                        borderColor: "#FFFFFF55",
+                      },
+                    ]}
+                  >
+                    <Ionicons name="sparkles" size={12} color={c.peach} />
+                    <Text style={cardPillText}>Open to meeting you</Text>
+                  </View>
+                )}
+                <View style={[cardPill, { backgroundColor: c.coralBright }]}>
+                  <Text style={cardPillText}>
+                    {VIBES.find((v) => v.id === member.vibes[0])?.label ??
+                      "Shared experiences"}
+                  </Text>
+                </View>
               </View>
-              <Text style={{ color: "white", fontSize: 13 }}>
-                {[member.occupation, member.city].filter(Boolean).join(" · ")}
-              </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-                {VIBES.filter((v) => member.vibes.includes(v.id))
-                  .slice(0, 3)
-                  .map((v) => (
-                    <View
-                      key={v.id}
-                      style={{
-                        borderRadius: 10,
-                        backgroundColor: c.ivory,
-                        padding: 8,
-                      }}
-                    >
-                      <Text style={{ color: c.charcoal, fontSize: 11 }}>
-                        {v.label}
-                      </Text>
-                    </View>
-                  ))}
+              <View style={{ paddingBottom: 30, gap: 11 }}>
+                <View
+                  style={{ flexDirection: "row", alignItems: "center", gap: 7 }}
+                >
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      color: "white",
+                      fontWeight: "700",
+                      fontSize: 28,
+                      flexShrink: 1,
+                    }}
+                  >
+                    {member.name}, {member.age}
+                  </Text>
+                  {member.identityVerified && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      color="#26A4F7"
+                      size={21}
+                    />
+                  )}
+                </View>
+                <Text style={{ color: "white", fontSize: 13 }}>
+                  {[member.occupation, member.city].filter(Boolean).join(" · ")}
+                </Text>
+                <View
+                  style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}
+                >
+                  {VIBES.filter((v) => member.vibes.includes(v.id))
+                    .slice(0, 3)
+                    .map((v) => (
+                      <View
+                        key={v.id}
+                        style={{
+                          borderRadius: 10,
+                          backgroundColor: c.ivory,
+                          padding: 8,
+                        }}
+                      >
+                        <Text style={{ color: c.charcoal, fontSize: 11 }}>
+                          {v.label}
+                        </Text>
+                      </View>
+                    ))}
+                </View>
+                <Text
+                  numberOfLines={3}
+                  style={{ color: "white", fontSize: 14, lineHeight: 21 }}
+                >
+                  {member.bio ||
+                    member.personalityPrompt?.answer ||
+                    "A shared experience could be the start of something."}
+                </Text>
               </View>
-              <Text
-                numberOfLines={3}
-                style={{ color: "white", fontSize: 14, lineHeight: 21 }}
-              >
-                {member.bio ||
-                  member.personalityPrompt?.answer ||
-                  "A shared experience could be the start of something."}
-              </Text>
-            </View>
-          </LinearGradient>
-        </Pressable>
-      </Animated.View>
-      <View
-        style={{
-          position: "absolute",
-          bottom: -31,
-          alignSelf: "center",
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 30,
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Pass on ${member.name}`}
-          disabled={busy}
-          onPress={() => void onAction("pass")}
-          style={[actionStyle, { width: 68, height: 68 }]}
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+        <View
+          style={{
+            position: "absolute",
+            bottom: -31,
+            alignSelf: "center",
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 30,
+          }}
         >
-          <Ionicons name="close-outline" color="#A2513E" size={31} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Save ${member.name}'s profile`}
-          disabled={busy}
-          onPress={() => void onAction("save")}
-          style={[actionStyle, { width: 54, height: 54 }]}
-        >
-          <Ionicons name="star" color={c.teal} size={25} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Like ${member.name}`}
-          disabled={busy}
-          onPress={() => void onAction("like")}
-          style={[actionStyle, { width: 68, height: 68 }]}
-        >
-          {busy ? (
-            <ActivityIndicator color={c.teal} />
-          ) : (
-            <Ionicons name="heart" color={c.coralBright} size={31} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Pass on ${member.name}`}
+            disabled={busy}
+            onPress={() => void onAction("pass")}
+            style={[actionStyle, { width: 68, height: 68 }]}
+          >
+            <Ionicons name="close-outline" color="#A2513E" size={31} />
+          </Pressable>
+          {member.vibeCheck && (
+            <VibeMatchButton
+              questions={member.vibeCheck.questionCount}
+              reduced={reduced}
+              disabled={busy}
+              onPress={() => router.push(`/vibe-check?id=${member.id}`)}
+            />
           )}
-        </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Like ${member.name}`}
+            disabled={busy}
+            onPress={() => void onAction("like")}
+            style={[actionStyle, { width: 68, height: 68 }]}
+          >
+            {busy ? (
+              <ActivityIndicator color={c.teal} />
+            ) : (
+              <Ionicons name="heart" color={c.coralBright} size={31} />
+            )}
+          </Pressable>
+        </View>
       </View>
     </View>
+  );
+}
+// Takes the middle action slot only for members with a Vibe Check.
+function VibeMatchButton({
+  questions,
+  reduced,
+  disabled,
+  onPress,
+}: {
+  questions: number;
+  reduced: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const [pulse] = useState(() => new Animated.Value(0));
+  useEffect(() => {
+    if (reduced) {
+      pulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1600,
+        useNativeDriver: Platform.OS !== "web",
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, reduced]);
+  const ring = (delay: number) => {
+    const t = pulse.interpolate({
+      inputRange: [0, delay, 1],
+      outputRange: [0, 0, 1 - delay],
+    });
+    return {
+      opacity: t.interpolate({
+        inputRange: [0, 0.1, 1 - delay],
+        outputRange: [0, 0.55, 0],
+      }),
+      transform: [
+        {
+          scale: t.interpolate({
+            inputRange: [0, 1 - delay],
+            outputRange: [1, 1.55],
+          }),
+        },
+      ],
+    };
+  };
+  const bob = pulse.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [1, 1.08, 1],
+  });
+  const tilt = pulse.interpolate({
+    inputRange: [0, 0.25, 0.5, 0.75, 1],
+    outputRange: ["0deg", "-12deg", "0deg", "12deg", "0deg"],
+  });
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Vibe Check · ${questions} questions`}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => ({
+        width: 62,
+        height: 62,
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.6 : pressed ? 0.85 : 1,
+      })}
+    >
+      {[0, 0.4].map((delay) => (
+        <Animated.View
+          key={delay}
+          pointerEvents="none"
+          style={[
+            {
+              position: "absolute",
+              width: 62,
+              height: 62,
+              borderRadius: 31,
+              borderWidth: 2,
+              borderColor: "#F25F8C",
+            },
+            ring(delay),
+          ]}
+        />
+      ))}
+      <Animated.View style={{ transform: [{ scale: bob }] }}>
+        <LinearGradient
+          colors={["#FF8B70", "#F25F8C", "#8E5BD9"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{
+            width: 62,
+            height: 62,
+            borderRadius: 31,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 3,
+            borderColor: c.white,
+            shadowColor: "#F25F8C",
+            shadowOpacity: 0.45,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 4 },
+            elevation: 8,
+          }}
+        >
+          <Animated.View style={{ transform: [{ rotate: tilt }] }}>
+            <Ionicons name="sparkles" color={c.white} size={26} />
+          </Animated.View>
+        </LinearGradient>
+      </Animated.View>
+      <View
+        pointerEvents="none"
+        style={{
+          position: "absolute",
+          top: -4,
+          right: -6,
+          minWidth: 22,
+          height: 22,
+          paddingHorizontal: 5,
+          borderRadius: 11,
+          backgroundColor: c.teal,
+          borderWidth: 2,
+          borderColor: c.white,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ color: c.white, fontSize: 10, fontWeight: "800" }}>
+          {questions}Q
+        </Text>
+      </View>
+    </Pressable>
   );
 }
 const cardPill = {
@@ -510,6 +671,11 @@ function DiscoveryFeed() {
       <Header
         right={
           <View style={{ flexDirection: "row" }}>
+            <IconButton
+              icon="sparkles-outline"
+              label="My Vibe Check"
+              onPress={() => router.push("/vibe-check")}
+            />
             <LikesButton count={likedMe.data?.length ?? 0} />
             <NotificationBell />
             <IconButton
@@ -825,6 +991,9 @@ function PersonDetail({ id }: { id: string }) {
         p.conversationId
           ? () => router.push(`/conversation?id=${p.conversationId}`)
           : undefined
+      }
+      onVibeCheck={
+        p.vibeCheck ? () => router.push(`/vibe-check?id=${p.id}`) : undefined
       }
       onReport={() => {
         setConfirmBlock(false);

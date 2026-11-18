@@ -69,7 +69,10 @@ export function planGroupsRouter() {
     },
   });
   router.get("/", async (req: AuthedRequest, res) => {
-    const memberships = await PlanGroupMember.find({ user: req.userId })
+    const memberships = await PlanGroupMember.find({
+      user: req.userId,
+      removedAt: null,
+    })
       .select("group")
       .lean();
     const groups = await PlanGroup.find({
@@ -269,6 +272,43 @@ export function planGroupsRouter() {
       ),
     });
   });
+  router.delete(
+    "/:id/members/:userId",
+    write,
+    async (req: AuthedRequest, res) => {
+      const targetId = groupId(req.params.userId);
+      await mongoose.connection.transaction(async (session) => {
+        const access = await authorisePlanGroup(
+          req.userId!,
+          req.params.id,
+          session,
+        );
+        if (!access.isOrganiser)
+          throw fail(403, "Only the organiser can remove group members.");
+        if (String(targetId) === access.organiserId)
+          throw fail(400, "The organiser cannot be removed from the group.");
+        const member = await PlanGroupMember.findOne({
+          group: access.group._id,
+          user: targetId,
+        }).session(session);
+        if (!member) throw fail(404, "Group member not found.");
+        if (member.removedAt) return;
+        member.removedAt = new Date();
+        await member.save({ session });
+        const name = access.members.find(
+          (user) => String(user._id) === String(targetId),
+        )?.name;
+        await appendGroupMessage(
+          access.group,
+          req.userId!,
+          `${name ?? "A member"} was removed from the group by the organiser.`,
+          "removed",
+          session,
+        );
+      });
+      res.status(204).end();
+    },
+  );
   router.post("/:id/messages", write, async (req: AuthedRequest, res) => {
     const input = z
       .object({

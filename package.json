@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "qa:vibes": "node tools/play-qa.mjs --vibes",
+    "qa:vibes:onboarding": "node tools/play-qa.mjs --vibe-onboarding",
     "mobile": "npm --prefix apps/mobile start",
     "web": "npm --prefix apps/mobile run web",
     "api": "npm --prefix apps/api run dev",

@@ -239,6 +239,150 @@ test("Social plans follow Matches/Discover scope and do not expire after 24 hour
   );
 });
 
+test("Discover shows Both plans to eligible men and women independently of dating preferences", async () => {
+  const moment = await publish("outsider", { audience: "discover" });
+  await Profile.updateOne(
+    { user: users.outsider },
+    {
+      gender: "man",
+      city: "Delhi",
+      approximateLocation: { type: "Point", coordinates: [77.21, 28.61] },
+      "preferences.genders": ["woman"],
+      "preferences.minAge": 18,
+      "preferences.maxAge": 20,
+    },
+  );
+  for (const [who, gender] of [["alice", "woman"], ["bob", "man"]]) {
+    await Profile.updateOne(
+      { user: users[who] },
+      {
+        gender,
+        approximateLocation: { type: "Point", coordinates: [88.36, 22.57] },
+        "preferences.genders": ["woman"],
+        "preferences.maxAge": 20,
+        "preferences.maxDistanceKm": 1,
+      },
+    );
+  }
+  const plan = await socialPlan("outsider", {
+    audience: { minAge: 18, maxAge: 60, gender: "both", maxDistanceKm: 10 },
+    approximateLocation: { type: "Point", coordinates: [88.36, 22.57] },
+  });
+  for (const who of ["alice", "bob"]) {
+    const response = await get(who, "feed?includePlans=true&scope=discover");
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.deepEqual(
+      response.body.data.items.map((item: { id: string }) => item.id),
+      [String(plan._id)],
+    );
+    assert.equal(
+      (await get(who, "feed?includePlans=true&scope=matches")).body.data.items.length,
+      0,
+    );
+    assert.equal((await get(who, `moments/${moment}`)).status, 404);
+    const detail = await request(app)
+      .get(`/api/v1/activities/${plan._id}`)
+      .set(auth(who));
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    assert.equal(detail.body.data.approximateLocation, undefined);
+  }
+  const joined = await request(app)
+    .post(`/api/v1/activities/${plan._id}/interests`)
+    .set(auth("bob"))
+    .send({});
+  assert.equal(joined.status, 201, JSON.stringify(joined.body));
+  const accepted = await request(app)
+    .post(`/api/v1/notifications/${joined.body.data._id}/conversation`)
+    .set(auth("outsider"))
+    .send({});
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  assert.ok(accepted.body.data.id);
+});
+
+test("Social Discover enforces the plan's gender, age and saved distance for public audiences", async () => {
+  await Profile.updateOne(
+    { user: users.bob },
+    { gender: "man", approximateLocation: { type: "Point", coordinates: [88.36, 22.57] } },
+  );
+  const plan = await socialPlan("outsider", {
+    audience: { minAge: 18, maxAge: 60, gender: "both", maxDistanceKm: 10 },
+    approximateLocation: { type: "Point", coordinates: [88.36, 22.57] },
+  });
+  const visible = async () => {
+    const result = await get("bob", "feed?includePlans=true&scope=discover");
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    return result.body.data.items.some(
+      (item: { id: string }) => item.id === String(plan._id),
+    );
+  };
+  assert.equal(await visible(), true);
+  await Activity.updateOne({ _id: plan._id }, { "audience.gender": "female" });
+  assert.equal(await visible(), false);
+  await Activity.updateOne(
+    { _id: plan._id },
+    { "audience.gender": "male", "audience.minAge": 60 },
+  );
+  assert.equal(await visible(), false);
+  await Activity.updateOne({ _id: plan._id }, { "audience.minAge": 18 });
+  assert.equal(await visible(), true);
+  await Profile.updateOne(
+    { user: users.bob },
+    { approximateLocation: { type: "Point", coordinates: [89.36, 22.57] } },
+  );
+  assert.equal(await visible(), false);
+  await Profile.updateOne(
+    { user: users.bob },
+    { $unset: { approximateLocation: 1 }, $set: { "preferences.maxDistanceKm": 5 } },
+  );
+  assert.equal(await visible(), false);
+  await Activity.updateOne({ _id: plan._id }, { "audience.maxDistanceKm": null });
+  assert.equal(await visible(), true);
+});
+
+test("public plan audiences preserve Social privacy and moderation even without dating compatibility", async () => {
+  // Retained connections can manage hiding/muting even if dating preferences change.
+  await ensureMatch(users.alice, users.outsider);
+  await Profile.updateOne(
+    { user: users.outsider },
+    { "preferences.genders": ["man"] },
+  );
+  const audience = { minAge: 18, maxAge: 60, gender: "both", maxDistanceKm: null };
+  const plan = await socialPlan("outsider", { audience });
+  await socialPlan("outsider", {
+    audience,
+    visibility: "private",
+    participants: [users.alice, users.outsider],
+  });
+  await socialPlan("outsider", { audience, ownerState: "paused" });
+  await socialPlan("outsider", { audience, status: "deleted" });
+  await socialPlan("outsider", {
+    audience,
+    startsAt: new Date(Date.now() - 86400000),
+  });
+  const expectPlan = async (expected: boolean) => {
+    const result = await get("alice", "feed?includePlans=true&scope=discover");
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.deepEqual(
+      result.body.data.items.map((item: { id: string }) => item.id),
+      expected ? [String(plan._id)] : [],
+    );
+  };
+  await expectPlan(true);
+  await settings("alice", { muted: [users.outsider] }).expect(200);
+  await expectPlan(false);
+  await settings("alice", {}).expect(200);
+  await settings("outsider", { hidden: [users.alice] }).expect(200);
+  await expectPlan(false);
+  await settings("outsider", { enabled: false }).expect(200);
+  await expectPlan(false);
+  await settings("outsider", {}).expect(200);
+  await Block.create({ user: users.outsider, target: users.alice });
+  await expectPlan(false);
+  await Block.deleteMany({});
+  await User.updateOne({ _id: users.outsider }, { status: "suspended" });
+  await expectPlan(false);
+});
+
 test("Social never exposes private, expired, paused, deleted or audience-restricted plans", async () => {
   const live = await socialPlan("bob");
   await socialPlan("bob", {
@@ -917,9 +1061,13 @@ test("Make a Plan requires mutual acceptance; changes invalidate old acceptance 
     404,
   );
   for (const who of ["alice", "bob"]) {
+    const detail = await request(app).get(`/api/v1/activities/${plan!._id}`).set(auth(who));
+    assert.equal(detail.status, 200, JSON.stringify(detail.body));
+    const match = await Match.findOne({ pairKey: pairKey(users.alice, users.bob) });
+    const conversation = await Conversation.findOne({ match: match!._id });
+    assert.equal(detail.body.data.conversationId, String(conversation!._id));
     assert.equal(
-      (await request(app).get(`/api/v1/activities/${plan!._id}`).set(auth(who)))
-        .status,
+      (await request(app).get(`/api/v1/conversations/${detail.body.data.conversationId}`).set(auth(who))).status,
       200,
     );
     assert.equal(

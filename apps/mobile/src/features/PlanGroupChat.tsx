@@ -153,6 +153,10 @@ export default function PlanGroupChat() {
     nextBefore: number | null;
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const pending = useRef<{ text: string; clientId: string } | null>(null);
   const lastMarked = useRef(0);
   const scroll = useRef<ScrollViewInstance>(null);
@@ -240,6 +244,25 @@ export default function PlanGroupChat() {
     } catch (e) {
       setError(
         e instanceof Error ? e.message : "Could not change permissions.",
+      );
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+  async function removeMember() {
+    if (!data?.isOrganiser || !removeTarget || settingsBusy) return;
+    setSettingsBusy(true);
+    setError("");
+    try {
+      await api(`/plan-groups/${id}/members/${removeTarget.id}`, {
+        method: "DELETE",
+      });
+      setRemoveTarget(null);
+      await query.refetch();
+      void client.invalidateQueries({ queryKey: ["plan-groups"] });
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Could not remove this member.",
       );
     } finally {
       setSettingsBusy(false);
@@ -342,18 +365,67 @@ export default function PlanGroupChat() {
           >
             <Text style={text.label}>Group members</Text>
             {data.members.map((member) => (
-              <View
-                key={member.id}
-                style={{
-                  flexDirection: "row",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Text style={text.body}>{member.name}</Text>
-                {member.isOrganiser && (
-                  <Text style={{ color: c.teal, fontWeight: "700" }}>
-                    Organiser · Admin
-                  </Text>
+              <View key={member.id} style={{ gap: 10 }}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <Text style={[text.body, { flex: 1 }]}>{member.name}</Text>
+                  {member.isOrganiser && (
+                    <Text style={{ color: c.teal, fontWeight: "700" }}>
+                      Organiser · Admin
+                    </Text>
+                  )}
+                  {data.isOrganiser && !member.isOrganiser && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${member.name} from group`}
+                      disabled={settingsBusy}
+                      onPress={() => {
+                        setError("");
+                        setRemoveTarget(member);
+                      }}
+                      style={{
+                        minHeight: 44,
+                        justifyContent: "center",
+                        paddingHorizontal: 8,
+                      }}
+                    >
+                      <Text style={{ color: "#BA4034", fontWeight: "700" }}>
+                        Remove
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+                {data.isOrganiser && removeTarget?.id === member.id && (
+                  <View style={{ gap: 10 }}>
+                    <Text style={text.label}>
+                      Remove {removeTarget.name} from the group?
+                    </Text>
+                    <Text style={text.muted}>
+                      They will lose access to this chat. Their place on the
+                      plan stays unchanged.
+                    </Text>
+                    <Button
+                      variant="coral"
+                      loading={settingsBusy}
+                      disabled={settingsBusy}
+                      onPress={() => void removeMember()}
+                    >
+                      Confirm removal
+                    </Button>
+                    <Button
+                      variant="outline"
+                      disabled={settingsBusy}
+                      onPress={() => setRemoveTarget(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </View>
                 )}
               </View>
             ))}

@@ -25,6 +25,7 @@ const membership = new Schema(
     user: ref("User"),
     joinedAfter: { type: Number, required: true, default: 0 },
     lastReadSequence: { type: Number, required: true, default: 0 },
+    removedAt: { type: Date, default: null },
   },
   { timestamps: true },
 );
@@ -39,7 +40,7 @@ const message = new Schema(
     text: { type: String, required: true, maxlength: 2000 },
     kind: {
       type: String,
-      enum: ["message", "created", "joined", "permissions"],
+      enum: ["message", "created", "joined", "permissions", "removed"],
       default: "message",
     },
     clientId: { type: String, maxlength: 80 },

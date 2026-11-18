@@ -72,6 +72,7 @@ export function MemberProfileView({
   onLike,
   onSave,
   onChat,
+  onVibeCheck,
   onReport,
   onBlock,
   blockLabel = "Block Profile",
@@ -86,6 +87,7 @@ export function MemberProfileView({
   onLike: () => void;
   onSave?: () => void;
   onChat?: () => void;
+  onVibeCheck?: () => void;
   onReport: () => void;
   onBlock: () => void;
   blockLabel?: string;
@@ -229,7 +231,7 @@ export function MemberProfileView({
               <View style={[styles.pill, { backgroundColor: c.coralBright }]}>
                 <Ionicons name="heart" size={13} color={c.white} />
                 <Text style={[styles.pillText, { color: c.white }]}>
-                  You like each other
+                  You&apos;re matched
                 </Text>
               </View>
             )}
@@ -355,6 +357,7 @@ export function MemberProfileView({
           </Section>
         )}
 
+        {onVibeCheck && <Button variant="outline" disabled={busy} onPress={onVibeCheck}>Try their Vibe Check</Button>}
         <Notice>
           A shared plan is a starting point. Romantic interest is always a
           separate, mutual choice.

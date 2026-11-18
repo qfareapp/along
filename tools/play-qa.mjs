@@ -5,7 +5,7 @@ const result = spawnSync(
   process.execPath,
   [
     "node_modules/tsx/dist/cli.mjs",
-    process.argv.includes("--groups")
+    process.argv.includes("--vibe-onboarding") ? "src/vibe-onboarding-browser-qa.ts" : process.argv.includes("--vibes") ? "src/vibe-check-browser-qa.ts" : process.argv.includes("--groups")
       ? "src/plan-group-browser-qa.ts"
       : "src/play-browser-qa.ts",
   ],

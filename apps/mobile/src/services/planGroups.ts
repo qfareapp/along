@@ -8,7 +8,7 @@ export type GroupMessage = {
   text: string;
   createdAt: string;
   own: boolean;
-  kind: "message" | "created" | "joined" | "permissions";
+  kind: "message" | "created" | "joined" | "permissions" | "removed";
   sender: { id: string; name: string; isOrganiser: boolean };
 };
 export type PlanGroupSummary = {

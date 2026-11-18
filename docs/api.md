@@ -12,6 +12,7 @@ All data routes use `/api/v1`. Successful responses contain `{ data }`; discover
 | POST   | /auth/logout              | refreshToken; revokes refresh capability                                               |
 | GET    | /categories               | Active category records                                                                |
 | GET    | /users/me                 | Bearer token; private own account and profile                                          |
+| DELETE | /users/me                 | Bearer token; password. Soft-deletes the account, revokes sessions, erases profile content and photos, cancels own plans, disables Vibe Check |
 | PATCH  | /profiles/me              | Bearer token; bio, occupation, city, area, interests                                   |
 | GET    | /activities               | Bearer token; optional category, q, cursor; block filtered                             |
 | POST   | /activities               | Bearer token, verified email; activity input below                                     |

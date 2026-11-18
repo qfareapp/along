@@ -15,6 +15,7 @@ import { notificationsRouter } from "./notifications.js";
 import { socialRouter } from "./social.js";
 import { playRouter } from "./play.js";
 import { planGroupsRouter } from "./plan-groups.js";
+import { vibeChecksRouter } from "./vibe-checks.js";
 import { preparePlanAudience } from "./plan-audience.js";
 import { activitiesRouter, activityScope } from "./activities.js";
 import {
@@ -30,10 +31,13 @@ import {
   Category,
   Match,
   Profile,
+  ProfilePhoto,
   RefreshSession,
   Report,
   User,
 } from "./models.js";
+import { VibeCheck } from "./vibe-check-models.js";
+import { deleteCloudinaryPhoto } from "./photos.js";
 import {
   activityInput,
   checkPlanDetails,
@@ -107,6 +111,7 @@ export function createApp() {
   app.use("/api/v1/social", socialRouter());
   app.use("/api/v1/games", playRouter());
   app.use("/api/v1/plan-groups", planGroupsRouter());
+  app.use("/api/v1/vibe-checks", vibeChecksRouter());
   app.use("/api/v1/activities", activitiesRouter());
   const onboarding = onboardingRouter();
   app.use("/api/v1", (req, res, next) => {
@@ -212,6 +217,74 @@ export function createApp() {
       },
     });
   });
+  // Self-service deletion: the account becomes "deleted" (the same terminal
+  // state admins use), personal profile content is erased, and the record plus
+  // any reports stay for moderation. The email remains reserved.
+  app.delete(
+    "/api/v1/users/me",
+    authLimit,
+    authenticate,
+    async (req: AuthedRequest, res) => {
+      const { password } = z
+        .object({ password: z.string().min(1).max(200) })
+        .parse(req.body);
+      const user = await User.findOne({
+        _id: req.userId,
+        status: "active",
+        adminRole: null,
+      }).select("+passwordHash");
+      if (!user) throw fail(404, "Account unavailable.");
+      // 400, not 401: a wrong password must not look like an expired session.
+      if (!(await bcrypt.compare(password, user.passwordHash)))
+        throw fail(400, "Password is incorrect.");
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: { status: "deleted", name: "Deleted member" },
+          $inc: { sessionVersion: 1 },
+          $unset: { lastActiveAt: 1 },
+        },
+      );
+      await RefreshSession.deleteMany({ user: user._id });
+      const photos = await ProfilePhoto.find({ owner: user._id }).select(
+        "+cloudinaryPublicId",
+      );
+      for (const photo of photos)
+        if (photo.cloudinaryPublicId)
+          await deleteCloudinaryPhoto(photo.cloudinaryPublicId).catch(
+            () => undefined,
+          );
+      await Promise.all([
+        ProfilePhoto.deleteMany({ owner: user._id }),
+        Profile.updateOne(
+          { user: user._id },
+          {
+            $set: { photos: [], interests: [] },
+            $unset: {
+              bio: 1,
+              occupation: 1,
+              city: 1,
+              area: 1,
+              gender: 1,
+              approximateLocation: 1,
+              optionalDetails: 1,
+              preferences: 1,
+              "onboarding.personalityPrompt": 1,
+            },
+          },
+        ),
+        Activity.updateMany(
+          { creator: user._id, status: { $ne: "deleted" } },
+          { $set: { status: "deleted" } },
+        ),
+        VibeCheck.updateOne(
+          { owner: user._id },
+          { $set: { enabled: false, autoMatch: false, questions: [] } },
+        ),
+      ]);
+      res.status(204).end();
+    },
+  );
   app.patch(
     "/api/v1/profiles/me",
     authenticate,

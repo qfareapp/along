@@ -7,13 +7,15 @@ import {
   ActivityInterest,
   ActivitySave,
   Category,
+  Conversation,
+  Match,
   Profile,
   ProfilePhoto,
   User,
 } from "./models.js";
 import { compatibleProfiles } from "./discovery.js";
 import { fail, requireReady, vibeCategories } from "./onboarding.js";
-import { ensureMatch } from "./chat.js";
+import { ensureMatch, pairKey } from "./chat.js";
 import { addAcceptedGroupMember } from "./plan-group-service.js";
 import { config } from "./config.js";
 import { socialScope } from "./social.js";
@@ -52,16 +54,12 @@ const objectId = (id: unknown) => {
   return new mongoose.Types.ObjectId(id);
 };
 
-// Match discovery's visibility: members open to the viewer; mutual preferences rank first.
+// Explicit plan audiences govern participation independently of dating preferences.
+// Plans without an audience retain their legacy discovery/location rules.
 export async function activityScope(userId: string) {
   const { viewer, filter, mutualFilter } = await compatibleProfiles(userId);
   const coordinates = viewer.approximateLocation?.coordinates;
   const radius = viewer.preferences?.maxDistanceKm;
-  if (radius != null && coordinates?.length !== 2)
-    throw fail(
-      400,
-      "Update your location in Dating Preferences to find nearby plans.",
-    );
   const location =
     radius != null && coordinates
       ? {
@@ -70,13 +68,15 @@ export async function activityScope(userId: string) {
           },
         }
       : { city: viewer.city };
-  const profiles = await Profile.find({ ...filter, ...location })
-    .select("user onboarding.vibes approximateLocation")
-    .lean();
-  const mutualCreators = await Profile.find({
-    ...mutualFilter,
-    ...location,
-  }).distinct("user");
+  const missingLocation = radius != null && coordinates?.length !== 2;
+  const profiles = missingLocation
+    ? []
+    : await Profile.find({ ...filter, ...location })
+        .select("user onboarding.vibes approximateLocation")
+        .lean();
+  const mutualCreators = missingLocation
+    ? []
+    : await Profile.find({ ...mutualFilter, ...location }).distinct("user");
   const categories = await Category.find({
     active: true,
     $or: [{ cities: { $size: 0 } }, { cities: viewer.city }],
@@ -84,6 +84,10 @@ export async function activityScope(userId: string) {
     .sort({ displayOrder: 1, name: 1 })
     .lean();
   const creators = [
+    new mongoose.Types.ObjectId(userId),
+    ...filter.user.$in,
+  ];
+  const legacyCreators = [
     new mongoose.Types.ObjectId(userId),
     ...profiles.map((p) => p.user),
   ];
@@ -96,7 +100,15 @@ export async function activityScope(userId: string) {
       ...liveActivityFilter(),
       creator: { $in: creators },
       category: { $in: categories.map((c) => c.slug) },
-      $and: [await planAudienceVisibility(userId)],
+      $and: [
+        await planAudienceVisibility(userId),
+        {
+          $or: [
+            { "audience.gender": { $in: ["male", "female", "both"] } },
+            { creator: { $in: legacyCreators } },
+          ],
+        },
+      ],
     },
   };
 }
@@ -146,6 +158,25 @@ async function serializePlans(
     ActivitySave.find({ user: userId, activity: { $in: ids } }).lean(),
     ActivityInterest.find({ user: userId, activity: { $in: ids } }).lean(),
   ]);
+  // Private agreements reuse the participants' existing direct chat. The
+  // creator is also a participant, so resolve the other person for either role.
+  const privatePair = (row: Record<string, any>) => {
+    if (row.visibility !== "private" ||
+        !row.participants?.some((p: unknown) => String(p) === userId)) return null;
+    const other = row.participants.find((p: unknown) => String(p) !== userId);
+    return other ? pairKey(userId, String(other)) : null;
+  };
+  const privatePairs = rows.map(privatePair).filter((key): key is string => !!key);
+  const privateMatches = privatePairs.length
+    ? await Match.find({ pairKey: { $in: privatePairs }, active: true })
+        .select("pairKey").lean()
+    : [];
+  const privateChats = privateMatches.length
+    ? await Conversation.find({ match: { $in: privateMatches.map(m => m._id) } })
+        .select("match").lean()
+    : [];
+  const chatByMatch = new Map(privateChats.map(chat => [String(chat.match), String(chat._id)]));
+  const privateChatByPair = new Map(privateMatches.map(match => [match.pairKey, chatByMatch.get(String(match._id))]));
   const photoIds = profiles
     .flatMap((p) => p.photos)
     .filter((id) => mongoose.isObjectIdOrHexString(id));
@@ -219,9 +250,9 @@ async function serializePlans(
         saved: saved.has(String(a._id)),
         interested: !!interest,
         interestStatus: interest?.status ?? (interest ? "pending" : null),
-        conversationId: interest?.conversation
-          ? String(interest.conversation)
-          : null,
+        conversationId: a.visibility === "private"
+          ? privateChatByPair.get(privatePair(a) ?? "") ?? null
+          : interest?.conversation ? String(interest.conversation) : null,
         isOwner: String(a.creator) === userId,
         creator: {
           _id: String(u._id),
@@ -245,14 +276,6 @@ export async function socialPlanCards(
   before: string | undefined,
   limit: number,
 ) {
-  const viewer = await Profile.findOne({ user: userId })
-    .select("preferences.maxDistanceKm approximateLocation")
-    .lean();
-  if (
-    viewer?.preferences?.maxDistanceKm != null &&
-    viewer.approximateLocation?.coordinates?.length !== 2
-  )
-    return [];
   const scope = await activityScope(userId);
   const rows = await Activity.find({
     $and: [

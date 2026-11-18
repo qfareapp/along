@@ -12,6 +12,7 @@ import {
   Switch,
   Text,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,6 +33,11 @@ import {
   text,
 } from "../components/ui";
 import DateTimeField from "../components/DateTimeField";
+import {
+  PhotoCropper,
+  type CropRatio,
+  type CroppedPhoto,
+} from "../components/PhotoCropper";
 import { localDate, localTime } from "../components/dateTime";
 import { MemberPhoto, ProfileAccess } from "./LiveDiscover";
 import { api, demoMode } from "../services/api";
@@ -814,6 +820,34 @@ export function MomentAvatar({
     </Pressable>
   );
 }
+// Very tall or very wide photos are letterboxed inside these limits.
+const MIN_PHOTO_ASPECT = 9 / 16,
+  MAX_PHOTO_ASPECT = 16 / 9;
+/** Shows a Moment photo at its own proportions instead of a fixed-height box. */
+function MomentPhoto({ path, large }: { path: string; large: boolean }) {
+  const [aspect, setAspect] = useState(4 / 5);
+  const { height } = useWindowDimensions();
+  return (
+    <View style={{ width: "100%", alignItems: "center" }}>
+      <MemberPhoto
+        path={path}
+        resizeMode="contain"
+        onAspectRatio={(ratio) =>
+          setAspect(
+            Math.min(MAX_PHOTO_ASPECT, Math.max(MIN_PHOTO_ASPECT, ratio)),
+          )
+        }
+        style={{
+          width: "100%",
+          // Keep tall photos from pushing everything else off screen.
+          maxWidth: height * (large ? 0.62 : 0.55) * aspect,
+          aspectRatio: aspect,
+          borderRadius: 20,
+        }}
+      />
+    </View>
+  );
+}
 function MomentContent({
   moment,
   large = false,
@@ -822,11 +856,7 @@ function MomentContent({
   large?: boolean;
 }) {
   return moment.type === "photo" && moment.mediaPath ? (
-    <MemberPhoto
-      path={moment.mediaPath}
-      resizeMode="contain"
-      style={{ width: "100%", height: large ? 420 : 340, borderRadius: 20 }}
-    />
+    <MomentPhoto path={moment.mediaPath} large={large} />
   ) : (
     <LinearGradient
       colors={themes[moment.theme] ?? themes.teal}
@@ -1237,7 +1267,12 @@ function MomentComposer() {
     [content, setContent] = useState(params.text ?? ""),
     [caption, setCaption] = useState(""),
     [theme, setTheme] = useState<Moment["theme"]>("teal"),
-    [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null),
+    // `original` is the uncropped source of `photo`, the version that gets
+    // uploaded; `cropSource` is the file open in the cropper.
+    [original, setOriginal] = useState<string | null>(null),
+    [photo, setPhoto] = useState<CroppedPhoto | null>(null),
+    [cropRatio, setCropRatio] = useState<CropRatio>("portrait"),
+    [cropSource, setCropSource] = useState<string | null>(null),
     [selectedAudience, setAudience] = useState<
       SocialSettings["audience"] | null
     >(null),
@@ -1260,7 +1295,8 @@ function MomentComposer() {
           throw new Error(
             "Choose a source photo up to 30 MB. It will be compressed automatically.",
           );
-        setPhoto(p);
+        setError("");
+        setCropSource(p.uri);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -1341,18 +1377,64 @@ function MomentComposer() {
       {type === "photo" ? (
         <View style={{ gap: 12 }}>
           {photo && (
-            <Image
-              source={{ uri: photo.uri }}
-              style={{ width: "100%", height: 320, borderRadius: 22 }}
-              resizeMode="contain"
+            <View style={{ alignItems: "center" }}>
+              <Image
+                source={{ uri: photo.uri }}
+                accessibilityLabel="Cropped photo preview"
+                style={{
+                  width: "100%",
+                  maxWidth: 420 * (photo.width / photo.height),
+                  aspectRatio: photo.width / photo.height,
+                  borderRadius: 22,
+                  backgroundColor: c.soft,
+                }}
+              />
+            </View>
+          )}
+          {photo ? (
+            <View style={[s.row, { gap: 10 }]}>
+              <View style={{ flex: 1 }}>
+                <Button
+                  variant="outline"
+                  icon="crop-outline"
+                  onPress={() => setCropSource(original)}
+                >
+                  Crop
+                </Button>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Button
+                  variant="outline"
+                  icon="images-outline"
+                  onPress={() => void pickPhoto()}
+                >
+                  Change
+                </Button>
+              </View>
+            </View>
+          ) : (
+            <Button variant="outline" onPress={() => void pickPhoto()}>
+              Choose Photo
+            </Button>
+          )}
+          <Text style={text.muted}>
+            Crop to 1:1, 4:5, 16:9 or keep the original. Photos are
+            automatically compressed under 100 KB.
+          </Text>
+          {!!cropSource && (
+            <PhotoCropper
+              key={cropSource}
+              uri={cropSource}
+              initialRatio={cropRatio}
+              onCancel={() => setCropSource(null)}
+              onDone={(cropped, ratio) => {
+                setOriginal(cropSource);
+                setPhoto(cropped);
+                setCropRatio(ratio);
+                setCropSource(null);
+              }}
             />
           )}
-          <Button variant="outline" onPress={() => void pickPhoto()}>
-            {photo ? "Choose Another Photo" : "Choose Photo"}
-          </Button>
-          <Text style={text.muted}>
-            Photos are automatically compressed under 100 KB.
-          </Text>
         </View>
       ) : (
         <>

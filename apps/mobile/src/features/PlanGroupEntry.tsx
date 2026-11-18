@@ -46,7 +46,7 @@ export function PlanGroupEntry({ plan }: { plan: PlanRecord }) {
     }
   }
   return (
-    <View style={[card, { padding: 18, gap: 12, marginTop: 22 }]}>
+    <View style={[card, { padding: 18, gap: 12 }]}>
       <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
         <Ionicons name="people" size={21} color={c.teal} />
         <Text style={text.label}>Plan group chat</Text>

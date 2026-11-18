@@ -1,5 +1,11 @@
 import React from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { text } from "../components/ui";
 import { colors as c } from "../theme";
@@ -10,12 +16,14 @@ export function PlanStatusControl({
   busy,
   blocked = false,
   expired = false,
+  style,
 }: {
   state?: OwnerPlanState;
   onChange: (state: OwnerPlanState) => void;
   busy?: boolean;
   blocked?: boolean;
   expired?: boolean;
+  style?: ViewStyle;
 }) {
   const choices = [
     {
@@ -68,15 +76,18 @@ export function PlanStatusControl({
             };
   return (
     <View
-      style={{
-        marginBottom: 18,
-        padding: 16,
-        borderRadius: 22,
-        backgroundColor: c.soft,
-        borderWidth: 1,
-        borderColor: c.line,
-        gap: 14,
-      }}
+      style={[
+        {
+          marginBottom: 18,
+          padding: 16,
+          borderRadius: 22,
+          backgroundColor: c.soft,
+          borderWidth: 1,
+          borderColor: c.line,
+          gap: 14,
+        },
+        style,
+      ]}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Text style={[text.label, { flex: 1, fontSize: 15 }]}>Plan status</Text>

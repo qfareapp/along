@@ -54,6 +54,11 @@ const send = (
   clientId = crypto.randomUUID(),
   text = "Looking forward to our trip!",
 ) => post(`/${id}/messages`, { text, clientId }, who);
+const removeMember = (id: string, target: string, who = 0) =>
+  request(app)
+    .delete(`/api/v1/plan-groups/${id}/members/${target}`)
+    .set("X-Forwarded-For", `198.51.100.${sequence}`)
+    .auth(access[who], { type: "bearer" });
 async function selected(count = 2) {
   const participants = ids.slice(1, count + 1);
   await Activity.updateOne({ _id: plan }, { participants });
@@ -244,6 +249,94 @@ test("only the organiser can change permissions; attendees remain able to read a
   assert.equal((await mode(id, "everyone")).status, 200);
   assert.equal((await send(id, 1)).status, 201);
 });
+test("organiser removal revokes every chat entry point, updates the roster, and preserves plan attendance", async () => {
+  await selected();
+  const id = await group();
+  await send(id, 1);
+  assert.equal((await removeMember(id, ids[1]!)).status, 204);
+  const thread = (await get(`/${id}`)).body.data;
+  assert.equal(thread.memberCount, 2);
+  assert(
+    !thread.members.some((member: { id: string }) => member.id === ids[1]),
+  );
+  assert.equal(thread.messages.at(-1).kind, "removed");
+  assert.match(thread.messages.at(-1).text, /Traveller 1 was removed/);
+  assert.deepEqual((await get("", 1)).body.data, []);
+  assert.equal((await get(`/for-plan/${plan}`, 1)).status, 404);
+  assert.equal((await get(`/${id}`, 1)).status, 404);
+  assert.equal((await get(`/${id}?before=2`, 1)).status, 404);
+  assert.equal((await send(id, 1)).status, 404);
+  assert.equal(
+    (await post(`/${id}/read`, { throughSequence: 999 }, 1)).status,
+    404,
+  );
+  assert.equal((await mode(id, "organiser_only", 1)).status, 404);
+  assert.equal((await send(id, 2)).status, 201);
+  assert(
+    (await Activity.findById(plan))!.participants.some(
+      (user) => String(user) === ids[1],
+    ),
+  );
+  const interest = await ActivityInterest.findOne({
+    activity: plan,
+    user: ids[1],
+  });
+  assert.equal(interest!.status, "accepted");
+  await acceptActivityInterest(ids[0], String(interest!._id));
+  await post("", { activityId: plan });
+  assert.equal((await get(`/${id}`, 1)).status, 404);
+});
+
+test("only the organiser removes members and the organiser cannot be removed", async () => {
+  await selected();
+  const id = await group("organiser_only");
+  assert.equal((await removeMember(id, ids[2]!, 1)).status, 403);
+  assert.equal((await removeMember(id, ids[0]!, 1)).status, 403);
+  assert.equal((await removeMember(id, ids[0]!)).status, 400);
+  assert.equal((await removeMember(id, ids[1]!, 3)).status, 404);
+  assert.equal((await removeMember(id, ids[3]!)).status, 404);
+  assert.equal((await removeMember(id, "invalid")).status, 404);
+  assert.equal((await get(`/${id}`)).body.data.memberCount, 3);
+  assert.equal((await removeMember(id, ids[1]!)).status, 204);
+  assert.equal((await removeMember(id, ids[2]!)).status, 204);
+  assert.equal((await get(`/${id}`)).body.data.memberCount, 1);
+  assert.equal((await send(id, 0)).status, 201);
+});
+
+test("concurrent removal retries produce one notice", async () => {
+  await selected();
+  const id = await group();
+  const replies = await Promise.all([
+    removeMember(id, ids[1]!),
+    removeMember(id, ids[1]!),
+  ]);
+  assert(
+    replies.every((reply) => reply.status === 204),
+    JSON.stringify(replies.map((reply) => reply.body)),
+  );
+  assert.equal(
+    await PlanGroupMessage.countDocuments({ group: id, kind: "removed" }),
+    1,
+  );
+  assert.equal((await get(`/${id}`)).body.data.memberCount, 2);
+});
+
+test("removal racing a send prevents messages after the removal notice", async () => {
+  await selected();
+  const id = await group();
+  const key = crypto.randomUUID();
+  const [removed, sent] = await Promise.all([
+    removeMember(id, ids[1]!),
+    send(id, 1, key),
+  ]);
+  assert.equal(removed.status, 204, JSON.stringify(removed.body));
+  assert([201, 404].includes(sent.status), JSON.stringify(sent.body));
+  const notice = await PlanGroupMessage.findOne({ group: id, kind: "removed" });
+  const message = await PlanGroupMessage.findOne({ group: id, clientId: key });
+  if (message) assert(message.sequence < notice!.sequence);
+  assert.equal((await send(id, 1)).status, 404);
+});
+
 test("a mode change racing a participant send has a consistent transactional ordering", async () => {
   await selected();
   const id = await group();

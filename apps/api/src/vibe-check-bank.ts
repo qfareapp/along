@@ -1,0 +1,27 @@
+/** Stable IDs: changing a preset must never change a saved check's snapshot. */
+export const vibePresets = [
+  ["Your ideal weekend?", "Cozy indoors", "Explore outdoors"],
+  ["Coffee or chai?", "Coffee", "Chai"],
+  ["Mountains or beaches?", "Mountains", "Beaches"],
+  ["Your social energy?", "Introvert", "Extrovert"],
+  ["Plans or spontaneity?", "Plan ahead", "Go with the flow"],
+  ["Ideal first date?", "Quiet café", "Fun activity"],
+  ["Movie preference?", "Comedy", "Thriller"],
+  ["Your sleep schedule?", "Early bird", "Night owl"],
+  ["Holiday preference?", "Relaxing getaway", "Adventure trip"],
+  ["Favourite food experience?", "Street food", "Fine dining"],
+  ["Communication style?", "Calls", "Text messages"],
+  ["At a party?", "Small group chats", "Meet everyone"],
+  ["Your shopping style?", "In-store browsing", "Online shopping"],
+  ["Fitness preference?", "Gym workouts", "Outdoor activities"],
+  ["Music experience?", "Live concerts", "Personal playlists"],
+  ["How do you show affection?", "Words of appreciation", "Thoughtful actions"],
+  ["Conflict resolution?", "Talk immediately", "Take time, then talk"],
+  ["Date-night preference?", "Home-cooked dinner", "Restaurant outing"],
+  ["Free evening?", "Read or watch something", "Meet friends"],
+  ["Relationship pace?", "Take it slowly", "Explore the connection quickly"],
+].map(([prompt, a, b], index) => ({
+  id: `preset_${index + 1}`,
+  prompt,
+  options: [a, b],
+}));

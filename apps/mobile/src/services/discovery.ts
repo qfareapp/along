@@ -1,6 +1,7 @@
 import { api } from "./api";
 export type MemberCard = {
   id: string;
+  vibeCheck?: { questionCount: number; threshold: number; autoMatch: boolean } | null;
   name: string;
   age: number;
   identityVerified: boolean;

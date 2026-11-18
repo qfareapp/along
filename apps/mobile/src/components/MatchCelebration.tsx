@@ -295,7 +295,7 @@ function Celebration({ match }: { match: CelebratedMatch }) {
               <Text style={s.kicker}>NEW CONNECTION</Text>
               <Text style={s.title}>It’s a match!</Text>
               <Text style={s.body}>
-                You and {match.name} liked each other. Say hello while the vibe
+                You and {match.name} matched. Say hello while the vibe
                 is fresh.
               </Text>
             </Animated.View>

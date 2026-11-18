@@ -10,7 +10,10 @@ import {
   ProfilePhoto,
   ProfileSwipe,
   User,
+  Match,
+  Conversation,
 } from "./models.js";
+import { VibeCheck } from "./vibe-check-models.js";
 import {
   completion,
   discoveryUserIds,
@@ -113,6 +116,9 @@ async function publicCards(profiles: InstanceType<typeof Profile>[]) {
     .select("owner")
     .lean();
   const byId = new Map(users.map((u) => [String(u._id), u]));
+  const checks = await VibeCheck.find({ owner: { $in: ids }, enabled: true })
+    .select("owner threshold autoMatch questions.id").lean();
+  const byOwner = new Map(checks.map(check => [String(check.owner), check]));
   return profiles.flatMap((p) => {
     const u = byId.get(String(p.user));
     if (!u?.birthDate) return [];
@@ -141,6 +147,11 @@ async function publicCards(profiles: InstanceType<typeof Profile>[]) {
           ),
         ),
         memberSince: u.createdAt ?? null,
+        vibeCheck: byOwner.has(String(u._id)) ? {
+          questionCount: byOwner.get(String(u._id))!.questions.length,
+          threshold: byOwner.get(String(u._id))!.threshold,
+          autoMatch: byOwner.get(String(u._id))!.autoMatch,
+        } : null,
       },
     ];
   });
@@ -158,9 +169,11 @@ export function discoveryRouter() {
     const { viewer, filter, mutualFilter, incoming } = await compatibleProfiles(
       req.userId!,
     );
-    const seen = await ProfileSwipe.find({ user: req.userId }).distinct(
-      "target",
-    );
+    const [swiped, matched] = await Promise.all([
+      ProfileSwipe.find({ user: req.userId }).distinct("target"),
+      Match.find({ users: req.userId, active: true }).distinct("users"),
+    ]);
+    const seen = [...swiped, ...matched];
     const radius = viewer.preferences?.maxDistanceKm;
     const coordinates = viewer.approximateLocation?.coordinates;
     if (radius != null && coordinates?.length !== 2)
@@ -431,14 +444,20 @@ export function discoveryRouter() {
         user: { ...mutualFilter.user, $eq: card.id },
       }),
     ]);
+    const activeMatch = await Match.findOne({
+      users: { $all: [req.userId!, card.id] }, active: true,
+    }).lean();
+    const existingConversation = activeMatch
+      ? await Conversation.findOne({ match: activeMatch._id }).lean()
+      : null;
     res.json({
       data: {
         ...card,
         mutualMatch: !!mutualMatch,
         action: own?.action === "pass" ? undefined : own?.action,
-        mutual: own?.action === "like" && !!reciprocal,
+        mutual: !!existingConversation || (own?.action === "like" && !!reciprocal),
         conversationId:
-          own?.action === "like" && reciprocal
+          existingConversation ? String(existingConversation._id) : own?.action === "like" && reciprocal
             ? await ensureMatch(req.userId!, card.id)
             : null,
         plans,

@@ -30,14 +30,20 @@ import {
 } from "../services/plans";
 import { MemberPhoto } from "./LiveDiscover";
 import { PlanTypeBadge } from "../components/PlanTypeBadge";
-import { PlanAudienceSummary } from "../components/PlanAudienceSummary";
+import { distanceRange } from "../components/DistancePreference";
 import { colors as c } from "../theme";
-import { CategoryPlanSummary } from "./CategoryPlanFields";
+import { fieldsForCategory } from "../../../../packages/plan-details/index.js";
 import DateTimeField from "../components/DateTimeField";
 import { localDate } from "../components/dateTime";
 import { PlanStatusControl, type OwnerPlanState } from "./PlanStatusControl";
 import { formatSchedule } from "./PlanSchedule";
 import { PlanGroupEntry } from "./PlanGroupEntry";
+
+type IconName = React.ComponentProps<typeof Ionicons>["name"];
+const GUTTER = 20;
+const SECTION_GAP = 24;
+const danger = "#BA4034";
+
 export default function LiveActivityDetail() {
   const insets = useSafeAreaInsets();
   const { id, created } = useLocalSearchParams<{
@@ -97,7 +103,7 @@ export default function LiveActivityDetail() {
   // Closed plans behave like expired ones: only a new date brings them back.
   const ended = !!plan.expired || plan.ownerState === "closed";
   const requestLabel = plan.privatePlan
-    ? "View private plan agreement"
+    ? "Message"
     : plan.isOwner
       ? plan.ownerState === "successful"
         ? "Plan successful"
@@ -117,6 +123,17 @@ export default function LiveActivityDetail() {
             : plan.availability === "full"
               ? "Activity Full"
               : "I'm Interested";
+  const requestIcon: IconName | undefined = plan.privatePlan
+    ? "chatbubble-ellipses-outline"
+    : !plan.isOwner
+      ? plan.interestStatus === "accepted"
+        ? "chatbubble-ellipses-outline"
+        : plan.interestStatus === "pending"
+          ? "checkmark"
+          : !plan.interestStatus && plan.availability !== "full"
+            ? "hand-right-outline"
+            : undefined
+      : undefined;
   const status = plan.privatePlan
     ? { label: "Private · agreed together", color: c.teal }
     : plan.isOwner
@@ -141,10 +158,12 @@ export default function LiveActivityDetail() {
     (new Date(start).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) /
       86400000,
   );
+  const audience = plan.audience;
   const details: {
-    icon: React.ComponentProps<typeof Ionicons>["name"];
+    icon: IconName;
     label: string;
     value: string;
+    sub?: string;
     hint?: string;
     hintColor?: string;
   }[] = [
@@ -191,16 +210,52 @@ export default function LiveActivityDetail() {
       label: "Costs",
       value: plan.budget ?? "Agree on costs together",
     },
+    ...(audience
+      ? [
+          {
+            icon: "person-circle-outline" as const,
+            label: "Who it's for",
+            value: `Ages ${audience.minAge}–${audience.maxAge} · ${
+              audience.gender === "male"
+                ? "Male"
+                : audience.gender === "female"
+                  ? "Female"
+                  : "All genders"
+            }`,
+            sub:
+              audience.maxDistanceKm == null
+                ? "Any distance"
+                : `Within ${distanceRange(audience.maxDistanceKm, audience.distanceUnit)} ${audience.distanceUnit} of the plan`,
+          },
+        ]
+      : []),
   ];
+  const extraDetails = plan.categoryDetails
+    ? fieldsForCategory(plan.category).flatMap((field) => {
+        const value = plan.categoryDetails?.[field.key];
+        if (!value || (Array.isArray(value) && !value.length)) return [];
+        return [
+          {
+            key: field.key,
+            label: field.label.replace(" (optional)", ""),
+            value: Array.isArray(value)
+              ? (
+                  field.options?.filter((day) => value.includes(day)) ?? value
+                ).join(", ")
+              : String(value),
+          },
+        ];
+      })
+    : [];
+  const canSave =
+    !plan.privatePlan &&
+    (!plan.isOwner ||
+      (!ended &&
+        (plan.ownerState ?? "live") === "live" &&
+        plan.publicationStatus !== "paused"));
   return (
     <Screen scroll={false}>
-      <ScrollView
-        contentContainerStyle={{
-          padding: 22,
-          paddingTop: 6,
-          paddingBottom: 30,
-        }}
-      >
+      <View style={{ paddingHorizontal: GUTTER }}>
         <Header
           back
           title={
@@ -223,83 +278,113 @@ export default function LiveActivityDetail() {
             ) : undefined
           }
         />
+      </View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: GUTTER,
+          paddingTop: 4,
+          paddingBottom: 32,
+          gap: SECTION_GAP,
+        }}
+      >
         {!!created &&
           !plan.expired &&
           (plan.ownerState ?? "live") === "live" &&
           plan.publicationStatus !== "paused" && (
-            <Notice>Your plan is published. Find it in Explore Plans.</Notice>
+            // Notice carries its own vertical margin; the column gap spaces it.
+            <View style={{ marginVertical: -10 }}>
+              <Notice>Your plan is published. Find it in Explore Plans.</Notice>
+            </View>
           )}
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 8,
-            marginTop: 18,
-          }}
-        >
+
+        {/* Hero: tags, title and the host */}
+        <View style={{ gap: 14 }}>
           <View
             style={{
               flexDirection: "row",
               alignItems: "center",
-              gap: 5,
-              paddingHorizontal: 11,
-              paddingVertical: 5,
-              borderRadius: 999,
-              backgroundColor: c.soft,
+              flexWrap: "wrap",
+              gap: 8,
             }}
           >
-            <Ionicons name="pricetag-outline" size={12} color={c.teal} />
-            <Text
-              style={{
-                color: c.teal,
-                fontSize: 11,
-                fontWeight: "700",
-                letterSpacing: 1.2,
-                textTransform: "uppercase",
-              }}
-            >
-              {category?.name ?? plan.category}
-            </Text>
-          </View>
-          <PlanTypeBadge type={plan.type} />
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 6,
-              paddingHorizontal: 11,
-              paddingVertical: 5,
-              borderRadius: 999,
-              backgroundColor: status.color + "1A",
-            }}
-          >
-            <View
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor: status.color,
-              }}
+            <Pill
+              icon="pricetag-outline"
+              label={category?.name ?? plan.category}
+              color={c.teal}
+              background={c.soft}
             />
-            <Text
-              style={{ color: status.color, fontSize: 11, fontWeight: "700" }}
-            >
-              {status.label}
-            </Text>
+            <PlanTypeBadge type={plan.type} />
+            <Pill
+              dot
+              label={status.label}
+              color={status.color}
+              background={status.color + "1A"}
+            />
           </View>
+          <Text
+            style={[
+              text.title,
+              { fontSize: 28, lineHeight: 34, letterSpacing: -0.8 },
+            ]}
+          >
+            {plan.title}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`View ${organizer.name}'s profile`}
+            onPress={() =>
+              router.push(
+                plan.isOwner
+                  ? "/(tabs)/profile"
+                  : `/person?id=${organizer._id}`,
+              )
+            }
+            style={({ pressed }) => [
+              card,
+              {
+                padding: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
+                borderRadius: 20,
+                opacity: pressed ? 0.8 : 1,
+              },
+            ]}
+          >
+            <MemberPhoto
+              id={organizer.photoId ?? undefined}
+              style={{ width: 48, height: 48, borderRadius: 16 }}
+            />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
+                {plan.isOwner ? "Hosted by you" : "Hosted by"}
+              </Text>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={[text.label, { fontSize: 16, flexShrink: 1 }]}
+                >
+                  {organizer.name}
+                  {organizer.age ? `, ${organizer.age}` : ""}
+                </Text>
+                {organizer.identityVerified && (
+                  <Ionicons name="checkmark-circle" color="#1597F5" size={16} />
+                )}
+              </View>
+            </View>
+            <Text style={{ color: c.teal, fontSize: 12, fontWeight: "700" }}>
+              {plan.isOwner ? "Your profile" : "View profile"}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={c.muted} />
+          </Pressable>
         </View>
-        <Text
-          style={[
-            text.title,
-            { fontSize: 30, lineHeight: 37, marginTop: 12, marginBottom: 22 },
-          ]}
-        >
-          {plan.title}
-        </Text>
-        <PlanAudienceSummary audience={plan.audience} />
+
         {plan.isOwner && !plan.privatePlan && !ended && (
           <PlanStatusControl
+            style={{ marginBottom: 0 }}
             state={plan.ownerState as OwnerPlanState | undefined}
             busy={busy}
             expired={plan.expired}
@@ -314,198 +399,97 @@ export default function LiveActivityDetail() {
             }
           />
         )}
-        <View style={[card, { borderRadius: 22, paddingHorizontal: 16 }]}>
-          {details.map((row, index) => (
-            <View
-              key={row.label}
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 13,
-                paddingVertical: 14,
-                borderTopWidth: index ? 1 : 0,
-                borderColor: c.line,
-              }}
-            >
+
+        <Section label="The essentials">
+          <View style={[card, { borderRadius: 22, paddingHorizontal: 16 }]}>
+            {details.map((row, index) => (
               <View
+                key={row.label}
                 style={{
-                  width: 40,
-                  height: 40,
-                  backgroundColor: c.soft,
-                  borderRadius: 13,
+                  flexDirection: "row",
                   alignItems: "center",
-                  justifyContent: "center",
+                  gap: 13,
+                  paddingVertical: 13,
+                  borderTopWidth: index ? 1 : 0,
+                  borderColor: c.line,
                 }}
               >
-                <Ionicons name={row.icon} size={19} color={c.teal} />
+                <IconTile icon={row.icon} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
+                    {row.label}
+                  </Text>
+                  <Text style={[text.label, { fontSize: 15, lineHeight: 20 }]}>
+                    {row.value}
+                  </Text>
+                  {!!row.sub && (
+                    <Text
+                      style={[text.muted, { fontSize: 12, lineHeight: 16 }]}
+                    >
+                      {row.sub}
+                    </Text>
+                  )}
+                </View>
+                {!!row.hint && (
+                  <Pill
+                    label={row.hint}
+                    color={row.hintColor ?? c.teal}
+                    background={(row.hintColor ?? c.teal) + "1A"}
+                  />
+                )}
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[text.muted, { fontSize: 11, lineHeight: 15 }]}>
-                  {row.label}
-                </Text>
-                <Text style={[text.label, { fontSize: 15, marginTop: 2 }]}>
-                  {row.value}
-                </Text>
-              </View>
-              {!!row.hint && (
-                <Text
+            ))}
+          </View>
+        </Section>
+
+        <Section label="About the plan">
+          <View style={[card, { borderRadius: 22, padding: 18 }]}>
+            <Text
+              style={[
+                text.body,
+                { fontSize: 15, lineHeight: 23 },
+                !plan.description?.trim() && { color: c.muted },
+              ]}
+            >
+              {plan.description?.trim() || "No description added yet."}
+            </Text>
+          </View>
+        </Section>
+
+        {extraDetails.length > 0 && (
+          <Section label="Plan details">
+            <View style={[card, { borderRadius: 22, paddingHorizontal: 18 }]}>
+              {extraDetails.map((row, index) => (
+                <View
+                  key={row.key}
                   style={{
-                    fontSize: 11,
-                    fontWeight: "700",
-                    color: row.hintColor ?? c.teal,
+                    paddingVertical: 13,
+                    gap: 2,
+                    borderTopWidth: index ? 1 : 0,
+                    borderColor: c.line,
                   }}
                 >
-                  {row.hint}
-                </Text>
-              )}
+                  <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
+                    {row.label}
+                  </Text>
+                  <Text style={[text.body, { fontSize: 15, lineHeight: 22 }]}>
+                    {row.value}
+                  </Text>
+                </View>
+              ))}
             </View>
-          ))}
-        </View>
-        <Text style={[sectionLabel, { marginTop: 26 }]}>
-          {plan.isOwner ? "Hosted by you" : "Your organizer"}
-        </Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`View ${organizer.name}'s profile`}
-          onPress={() =>
-            router.push(
-              plan.isOwner ? "/(tabs)/profile" : `/person?id=${organizer._id}`,
-            )
-          }
-          style={({ pressed }) => [
-            card,
-            {
-              padding: 13,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 13,
-              borderRadius: 22,
-              opacity: pressed ? 0.8 : 1,
-            },
-          ]}
-        >
-          <MemberPhoto
-            id={organizer.photoId ?? undefined}
-            style={{ width: 62, height: 62, borderRadius: 20 }}
-          />
-          <View style={{ flex: 1 }}>
-            <View
-              style={{ flexDirection: "row", alignItems: "center", gap: 5 }}
-            >
-              <Text style={[text.label, { fontSize: 17 }]}>
-                {organizer.name}
-                {organizer.age ? `, ${organizer.age}` : ""}
-              </Text>
-              {organizer.identityVerified && (
-                <Ionicons name="checkmark-circle" color="#1597F5" size={17} />
-              )}
-            </View>
-            <Text style={[text.muted, { fontSize: 12, marginTop: 2 }]}>
-              {plan.isOwner ? "That's you · View your profile" : "View profile"}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={c.muted} />
-        </Pressable>
-        <Text style={[sectionLabel, { marginTop: 26 }]}>About the plan</Text>
-        <View style={[card, { borderRadius: 22, padding: 17 }]}>
-          <Text style={[text.body, { fontSize: 15, lineHeight: 23 }]}>
-            {plan.description?.trim() || "No description added yet."}
-          </Text>
-        </View>
-        <View style={{ marginTop: 24 }}>
-          <CategoryPlanSummary
-            category={plan.category}
-            details={plan.categoryDetails}
-          />
-        </View>
-        <View
-          style={{
-            backgroundColor: "#E9EFE7",
-            padding: 17,
-            borderRadius: 22,
-            flexDirection: "row",
-            gap: 13,
-          }}
-        >
-          <View
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 13,
-              backgroundColor: c.white,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons
-              name="shield-checkmark-outline"
-              size={21}
-              color={c.teal}
-            />
-          </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={[text.label, { color: c.teal }]}>
-              Good plans start with feeling safe.
-            </Text>
-            <Text style={[text.muted, { fontSize: 12, lineHeight: 18 }]}>
-              Meet in public, arrange your own transport, and share your plans
-              with someone you trust. Joining a plan is never romantic consent.
-            </Text>
-            {!plan.isOwner && (
-              <View style={{ flexDirection: "row", gap: 16, marginTop: 8 }}>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() =>
-                    router.push(
-                      `/safety?target=${organizer._id}&activity=${plan._id}`,
-                    )
-                  }
-                >
-                  <Text style={safetyLink}>Report activity</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => setConfirmBlock(!confirmBlock)}
-                >
-                  <Text style={safetyLink}>Block organizer</Text>
-                </Pressable>
-              </View>
-            )}
-          </View>
-        </View>
-        {confirmBlock && (
-          <View style={[card, { marginTop: 14, padding: 16, gap: 12 }]}>
-            <Text style={text.body}>
-              Block {organizer.name}? Their plans and conversations will be
-              hidden for both of you.
-            </Text>
-            <Button
-              loading={busy}
-              onPress={() =>
-                void act(async () => {
-                  await api("/blocks", {
-                    method: "POST",
-                    body: JSON.stringify({ userId: organizer._id }),
-                  });
-                  router.replace("/(tabs)/plans");
-                })
-              }
-            >
-              Confirm block
-            </Button>
-          </View>
+          </Section>
         )}
+
         {plan.activityType === "group" &&
           (plan.isOwner || plan.interestStatus === "accepted") && (
             <PlanGroupEntry plan={plan} />
           )}
+
         {plan.isOwner && !plan.privatePlan && (
-          <>
-            <Text style={[sectionLabel, { marginTop: 26 }]}>Manage plan</Text>
+          <Section label="Manage plan">
             {ended && plan.ownerState !== "successful" && (
-              <View style={{ marginBottom: 10 }}>
+              <View style={{ marginTop: -10, marginBottom: 2 }}>
                 <Notice>
                   {plan.ownerState === "closed"
                     ? "You closed this plan, so it is only visible to you. Reschedule it to reopen."
@@ -526,7 +510,7 @@ export default function LiveActivityDetail() {
                   icon: "trash-outline" as const,
                   label: "Delete plan",
                   hint: "Remove it from discovery",
-                  color: "#BA4034",
+                  color: danger,
                   onPress: () => setConfirmDelete(!confirmDelete),
                 },
               ].map((item, index) => (
@@ -538,29 +522,24 @@ export default function LiveActivityDetail() {
                     flexDirection: "row",
                     alignItems: "center",
                     gap: 13,
-                    paddingVertical: 14,
+                    paddingVertical: 13,
                     borderTopWidth: index ? 1 : 0,
                     borderColor: c.line,
                     opacity: pressed ? 0.6 : 1,
                   })}
                 >
-                  <View
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 13,
-                      backgroundColor: item.color + "14",
-                      alignItems: "center",
-                      justifyContent: "center",
-                    }}
-                  >
-                    <Ionicons name={item.icon} size={19} color={item.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
+                  <IconTile
+                    icon={item.icon}
+                    color={item.color}
+                    background={item.color + "14"}
+                  />
+                  <View style={{ flex: 1, gap: 2 }}>
                     <Text style={[text.label, { color: item.color }]}>
                       {item.label}
                     </Text>
-                    <Text style={[text.muted, { fontSize: 12 }]}>
+                    <Text
+                      style={[text.muted, { fontSize: 12, lineHeight: 16 }]}
+                    >
                       {item.hint}
                     </Text>
                   </View>
@@ -586,17 +565,92 @@ export default function LiveActivityDetail() {
                 </Button>
               </View>
             )}
-          </>
+          </Section>
         )}
+
+        {/* Safety */}
+        <View
+          style={{
+            backgroundColor: "#E9EFE7",
+            padding: 16,
+            borderRadius: 22,
+            gap: 12,
+          }}
+        >
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <IconTile icon="shield-checkmark-outline" background={c.white} />
+            <View style={{ flex: 1, gap: 4 }}>
+              <Text style={[text.label, { color: c.teal }]}>
+                Good plans start with feeling safe.
+              </Text>
+              <Text style={[text.muted, { fontSize: 12, lineHeight: 18 }]}>
+                Meet in public, arrange your own transport, and share your plans
+                with someone you trust. Joining a plan is never romantic
+                consent.
+              </Text>
+            </View>
+          </View>
+          {!plan.isOwner && (
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <SafetyAction
+                icon="flag-outline"
+                label="Report"
+                onPress={() =>
+                  router.push(
+                    `/safety?target=${organizer._id}&activity=${plan._id}`,
+                  )
+                }
+              />
+              <SafetyAction
+                icon="ban-outline"
+                label="Block organizer"
+                active={confirmBlock}
+                onPress={() => setConfirmBlock(!confirmBlock)}
+              />
+            </View>
+          )}
+          {confirmBlock && !plan.isOwner && (
+            <View
+              style={{
+                backgroundColor: c.white,
+                borderRadius: 16,
+                padding: 14,
+                gap: 12,
+              }}
+            >
+              <Text style={text.body}>
+                Block {organizer.name}? Their plans and conversations will be
+                hidden for both of you.
+              </Text>
+              <Button
+                loading={busy}
+                onPress={() =>
+                  void act(async () => {
+                    await api("/blocks", {
+                      method: "POST",
+                      body: JSON.stringify({ userId: organizer._id }),
+                    });
+                    router.replace("/(tabs)/plans");
+                  })
+                }
+              >
+                Confirm block
+              </Button>
+            </View>
+          )}
+        </View>
       </ScrollView>
+
+      {/* Action bar */}
       <View
         style={{
-          padding: 18,
-          paddingBottom: 18 + insets.bottom,
+          paddingHorizontal: GUTTER,
+          paddingTop: 12,
+          paddingBottom: 12 + insets.bottom,
           backgroundColor: c.ivory,
           borderTopWidth: 1,
           borderColor: c.line,
-          gap: 9,
+          gap: 10,
         }}
       >
         {reschedule && plan.isOwner && !plan.privatePlan && (
@@ -656,54 +710,68 @@ export default function LiveActivityDetail() {
           </View>
         )}
         {!!error && (
-          <Text accessibilityRole="alert" style={{ color: "#BA4034" }}>
+          <Text
+            accessibilityRole="alert"
+            style={{ color: danger, fontSize: 13, textAlign: "center" }}
+          >
             {error}
           </Text>
         )}
-        {plan.interestStatus === "pending" && (
-          <Text style={[text.muted, { fontSize: 11, textAlign: "center" }]}>
-            The organizer has been notified and can accept and message you
-            first.
-          </Text>
+        {!plan.isOwner && plan.interestStatus === "pending" && (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+            }}
+          >
+            <Ionicons name="time-outline" size={14} color={c.muted} />
+            <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
+              The organizer was notified and can accept and message you first.
+            </Text>
+          </View>
         )}
-        <View style={{ flexDirection: "row", gap: 12 }}>
-          {!plan.privatePlan &&
-            (!plan.isOwner ||
-              (!ended &&
-                (plan.ownerState ?? "live") === "live" &&
-                plan.publicationStatus !== "paused")) && (
-              <IconButton
-                icon={plan.saved ? "bookmark" : "bookmark-outline"}
-                label={plan.saved ? "Unsave plan" : "Save plan"}
-                onPress={() => {
-                  if (!busy) void act(() => save(plan));
-                }}
-                style={{
-                  width: 52,
-                  height: 52,
-                  borderRadius: 16,
-                  backgroundColor: c.soft,
-                }}
-              />
-            )}
+        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+          {canSave && (
+            <IconButton
+              icon={plan.saved ? "bookmark" : "bookmark-outline"}
+              label={plan.saved ? "Unsave plan" : "Save plan"}
+              color={plan.saved ? c.coralBright : c.teal}
+              onPress={() => {
+                if (!busy) void act(() => save(plan));
+              }}
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 16,
+                backgroundColor: c.soft,
+                borderWidth: 1,
+                borderColor: c.line,
+              }}
+            />
+          )}
           <View style={{ flex: 1 }}>
             <Button
               variant="coral"
+              icon={requestIcon}
               loading={busy}
               disabled={
-                !plan.privatePlan &&
-                ((plan.isOwner &&
-                  (plan.ownerState === "successful" ||
-                    plan.publicationStatus === "paused")) ||
-                  (!plan.isOwner &&
-                    (plan.interestStatus === "pending" ||
-                      plan.interestStatus === "declined" ||
-                      (plan.availability === "full" &&
-                        plan.interestStatus !== "accepted"))))
+                plan.privatePlan
+                  ? !plan.conversationId
+                  : (plan.isOwner &&
+                      (plan.ownerState === "successful" ||
+                        plan.publicationStatus === "paused")) ||
+                    (!plan.isOwner &&
+                      (plan.interestStatus === "pending" ||
+                        plan.interestStatus === "declined" ||
+                        (plan.availability === "full" &&
+                          plan.interestStatus !== "accepted")))
               }
               onPress={() =>
                 plan.privatePlan
-                  ? router.push("/social-invitations")
+                  ? plan.conversationId &&
+                    router.push(`/conversation?id=${plan.conversationId}`)
                   : plan.isOwner
                     ? ended
                       ? setReschedule(!reschedule)
@@ -732,6 +800,129 @@ export default function LiveActivityDetail() {
     </Screen>
   );
 }
+
+function Section({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View>
+      <Text style={sectionLabel}>{label}</Text>
+      {children}
+    </View>
+  );
+}
+
+function Pill({
+  icon,
+  label,
+  color,
+  background,
+  dot = false,
+}: {
+  icon?: IconName;
+  label: string;
+  color: string;
+  background: string;
+  dot?: boolean;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        backgroundColor: background,
+      }}
+    >
+      {dot && (
+        <View
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 4,
+            backgroundColor: color,
+          }}
+        />
+      )}
+      {!!icon && <Ionicons name={icon} size={14} color={color} />}
+      <Text style={{ color, fontSize: 11, fontWeight: "700" }}>{label}</Text>
+    </View>
+  );
+}
+
+function IconTile({
+  icon,
+  color = c.teal,
+  background = c.soft,
+}: {
+  icon: IconName;
+  color?: string;
+  background?: string;
+}) {
+  return (
+    <View
+      style={{
+        width: 40,
+        height: 40,
+        borderRadius: 13,
+        backgroundColor: background,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Ionicons name={icon} size={19} color={color} />
+    </View>
+  );
+}
+
+function SafetyAction({
+  icon,
+  label,
+  onPress,
+  active = false,
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  active?: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        minHeight: 42,
+        borderRadius: 14,
+        backgroundColor: active ? c.teal : c.white,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <Ionicons name={icon} size={16} color={active ? c.white : c.teal} />
+      <Text
+        style={{
+          color: active ? c.white : c.teal,
+          fontSize: 13,
+          fontWeight: "700",
+        }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function formatWhen(date: Date) {
   return `${date.toLocaleDateString(undefined, {
     weekday: "short",
@@ -750,10 +941,4 @@ const sectionLabel = {
   textTransform: "uppercase",
   marginBottom: 10,
   marginLeft: 4,
-} as const;
-const safetyLink = {
-  color: c.teal,
-  fontSize: 12,
-  fontWeight: "700",
-  textDecorationLine: "underline",
 } as const;

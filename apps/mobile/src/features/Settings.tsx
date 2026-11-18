@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import {
   Button,
+  card,
   DemoNotice,
   Empty,
   Field,
@@ -104,6 +105,46 @@ export function Settings() {
             Clear Data & Start Again
           </Button>
         </View>
+      )}
+      {!demoMode && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Delete profile"
+          onPress={() => router.push("/delete-account")}
+          style={({ pressed }) => [
+            card,
+            {
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 13,
+              marginTop: 16,
+              borderColor: "#F3CFC8",
+            },
+            pressed && { backgroundColor: "#FBE9E6" },
+          ]}
+        >
+          <View
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 12,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: "#FBE9E6",
+            }}
+          >
+            <Ionicons name="trash-outline" size={18} color="#BA4034" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[text.label, { color: "#BA4034" }]}>
+              Delete profile
+            </Text>
+            <Text style={[text.muted, { fontSize: 12, lineHeight: 17 }]}>
+              Permanently remove your profile and photos
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="#C4B5A9" />
+        </Pressable>
       )}
       <DemoNotice />
     </Screen>

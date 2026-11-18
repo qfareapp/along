@@ -9,7 +9,9 @@ The organiser is the sole group admin. **Group members and settings** switches b
 
 Groups appear under **Chat > Plan groups**, with a message preview and per-member unread badge. The Chat tab badge includes group unread messages. The member panel labels the organiser as admin. The organiser can choose the initial messaging mode during creation, and change it later. Existing one-to-one chats remain separate.
 
-The accepted-attendee list is authoritative. New acceptances automatically add that person in the same transaction that reserves their plan place. They see their join notice and subsequent messages. Membership cannot be granted to arbitrary users, and the capacity/acceptance logic is unchanged. Existing group chat access is revoked when a member loses selection, either side blocks the organiser, the organiser is suspended, or the plan is removed/paused by moderation. The existing group remains available after a plan's date or organiser-managed completion/closure so members can coordinate.
+The accepted-attendee list determines eligibility. New acceptances automatically add that person in the same transaction that reserves their plan place. They see their join notice and subsequent messages. Membership cannot be granted to arbitrary users, and the capacity/acceptance logic is unchanged. Existing group chat access is revoked when a member loses selection, either side blocks the organiser, the organiser is suspended, or the plan is removed/paused by moderation. The existing group remains available after a plan's date or organiser-managed completion/closure so members can coordinate.
+
+In **Group members and settings**, the organiser can choose **Remove** beside any attendee and confirm removal. The organiser cannot be removed. Removed members lose access to the group list, thread, history and messaging; the roster/count update and the chat records a removal notice. Their plan attendance remains accepted. Removal is stored on the membership so repeated acceptance or group creation cannot silently restore chat access. Only the organiser can call the removal endpoint, and repeated removals are idempotent.
 
 ## Local preview
 
@@ -39,15 +41,16 @@ This uses actual organiser, accepted-member, and pending-member browser accounts
 
 All endpoints require the existing authenticated, activated member session. Responses are private/no-store.
 
-| Method | Path                               | Purpose                                                               |
-| ------ | ---------------------------------- | --------------------------------------------------------------------- |
-| GET    | `/api/v1/plan-groups`              | Current member's accessible groups and unread counts                  |
-| GET    | `/api/v1/plan-groups/for-plan/:id` | Owner/accepted-member group entry and creation eligibility            |
-| POST   | `/api/v1/plan-groups`              | Organiser-only creation; duplicate requests return the existing group |
-| GET    | `/api/v1/plan-groups/:id`          | Roster and chronological message page; optional `before`/`limit`      |
-| PATCH  | `/api/v1/plan-groups/:id/settings` | Organiser-only messaging mode                                         |
-| POST   | `/api/v1/plan-groups/:id/messages` | Authorised text submission with an idempotent client ID               |
-| POST   | `/api/v1/plan-groups/:id/read`     | Advance only this member's read cursor                                |
+| Method | Path                                      | Purpose                                                               |
+| ------ | ----------------------------------------- | --------------------------------------------------------------------- |
+| GET    | `/api/v1/plan-groups`                     | Current member's accessible groups and unread counts                  |
+| GET    | `/api/v1/plan-groups/for-plan/:id`        | Owner/accepted-member group entry and creation eligibility            |
+| POST   | `/api/v1/plan-groups`                     | Organiser-only creation; duplicate requests return the existing group |
+| GET    | `/api/v1/plan-groups/:id`                 | Roster and chronological message page; optional `before`/`limit`      |
+| PATCH  | `/api/v1/plan-groups/:id/settings`        | Organiser-only messaging mode                                         |
+| DELETE | `/api/v1/plan-groups/:id/members/:userId` | Organiser-only member removal; preserves plan attendance              |
+| POST   | `/api/v1/plan-groups/:id/messages`        | Authorised text submission with an idempotent client ID               |
+| POST   | `/api/v1/plan-groups/:id/read`            | Advance only this member's read cursor                                |
 
 `PlanGroup` is unique per plan. `PlanGroupMember` is unique per group/user and stores the join boundary/read cursor. `PlanGroupMessage` has an ordered per-group sequence and a unique group/sender/client ID for safe retries. Creation locks the plan row to serialize against concurrent acceptances; message and settings writes serialize on the group row. Selection, role, messaging restrictions and blocks are checked on every request. Roster data contains display names and roles, without email addresses, phone numbers, or precise locations.
 
