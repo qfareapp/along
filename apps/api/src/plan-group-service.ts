@@ -6,6 +6,7 @@ import {
   PlanGroupMessage,
 } from "./plan-group-models.js";
 import { fail } from "./onboarding.js";
+import { enqueuePush } from "./push.js";
 
 export const groupId = (value: unknown) => {
   if (typeof value !== "string" || !mongoose.isObjectIdOrHexString(value))
@@ -152,6 +153,23 @@ export async function appendGroupMessage(
     ],
     { session },
   );
+  const recipients = await PlanGroupMember.find({
+    group: group._id,
+    removedAt: null,
+    user: { $ne: sender },
+  }).session(session);
+  for (const member of recipients)
+    await enqueuePush(
+      {
+        key: `group:${message!._id}`,
+        user: String(member.user),
+        actor: sender,
+        kind: kind === "message" ? "group" : "notice",
+        target: String(group._id),
+        message: String(message!._id),
+      },
+      session,
+    );
   return message!;
 }
 /** Called in the existing acceptance transaction. A new attendee sees join/future messages, not earlier history. */

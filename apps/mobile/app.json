@@ -13,7 +13,8 @@
     },
     "android": {
       "package": "com.qfareapp.along",
-      "versionCode": 5,
+      "googleServicesFile": "./google-services.json",
+      "versionCode": 6,
       "adaptiveIcon": {
         "backgroundColor": "#015D5E",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -33,6 +34,10 @@
       "expo-router",
       "expo-font",
       "expo-secure-store",
+      [
+        "expo-notifications",
+        { "color": "#015D5E", "defaultChannel": "messages" }
+      ],
       [
         "expo-location",
         {

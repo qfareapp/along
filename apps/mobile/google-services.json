@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "19815888019",
+    "project_id": "along-e23a2",
+    "storage_bucket": "along-e23a2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:19815888019:android:053207162fe09f3ab98966",
+        "android_client_info": {
+          "package_name": "com.qfareapp.along"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDBESGc-vLuhD65lEEmlkbq-D6y8Az3vH4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

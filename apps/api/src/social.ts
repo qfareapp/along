@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { enqueuePush } from "./push.js";
 import mongoose from "mongoose";
 import multer from "multer";
 import { compressPhoto } from "./compress-photo.js";
@@ -101,7 +102,9 @@ export async function socialScope(userId: string, includePlanAuthors = false) {
   }
   const theirSettings = await SocialSettings.find({
     user: {
-      $in: [...new Set([...potential, ...discoverCandidates, ...planCandidates])],
+      $in: [
+        ...new Set([...potential, ...discoverCandidates, ...planCandidates]),
+      ],
     },
   }).lean();
   const byUser = new Map(theirSettings.map((s) => [String(s.user), s]));
@@ -291,6 +294,8 @@ async function notify(
     { $setOnInsert: { actor, recipient, kind, moment, invitation } },
     { upsert: true },
   );
+  if (!["reply", "shared"].includes(kind))
+    await enqueuePush({ key: `social:${key}`, user: recipient, actor });
 }
 async function socialConversation(from: string, to: string) {
   const scope = await socialScope(from);
@@ -334,6 +339,14 @@ async function privateMessage(
     { _id: conversation._id },
     { $set: { updatedAt: new Date() } },
   );
+  await enqueuePush({
+    key: `message:${message._id}`,
+    user: to,
+    actor: from,
+    kind: "message",
+    target: String(conversation._id),
+    message: String(message._id),
+  });
   return {
     conversationId: String(conversation._id),
     messageId: String(message._id),

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { enqueuePush } from "./push.js";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { authenticate, type AuthedRequest } from "./auth.js";
@@ -117,8 +118,9 @@ async function publicCards(profiles: InstanceType<typeof Profile>[]) {
     .lean();
   const byId = new Map(users.map((u) => [String(u._id), u]));
   const checks = await VibeCheck.find({ owner: { $in: ids }, enabled: true })
-    .select("owner threshold autoMatch questions.id").lean();
-  const byOwner = new Map(checks.map(check => [String(check.owner), check]));
+    .select("owner threshold autoMatch questions.id")
+    .lean();
+  const byOwner = new Map(checks.map((check) => [String(check.owner), check]));
   return profiles.flatMap((p) => {
     const u = byId.get(String(p.user));
     if (!u?.birthDate) return [];
@@ -147,11 +149,13 @@ async function publicCards(profiles: InstanceType<typeof Profile>[]) {
           ),
         ),
         memberSince: u.createdAt ?? null,
-        vibeCheck: byOwner.has(String(u._id)) ? {
-          questionCount: byOwner.get(String(u._id))!.questions.length,
-          threshold: byOwner.get(String(u._id))!.threshold,
-          autoMatch: byOwner.get(String(u._id))!.autoMatch,
-        } : null,
+        vibeCheck: byOwner.has(String(u._id))
+          ? {
+              questionCount: byOwner.get(String(u._id))!.questions.length,
+              threshold: byOwner.get(String(u._id))!.threshold,
+              autoMatch: byOwner.get(String(u._id))!.autoMatch,
+            }
+          : null,
       },
     ];
   });
@@ -445,7 +449,8 @@ export function discoveryRouter() {
       }),
     ]);
     const activeMatch = await Match.findOne({
-      users: { $all: [req.userId!, card.id] }, active: true,
+      users: { $all: [req.userId!, card.id] },
+      active: true,
     }).lean();
     const existingConversation = activeMatch
       ? await Conversation.findOne({ match: activeMatch._id }).lean()
@@ -455,9 +460,11 @@ export function discoveryRouter() {
         ...card,
         mutualMatch: !!mutualMatch,
         action: own?.action === "pass" ? undefined : own?.action,
-        mutual: !!existingConversation || (own?.action === "like" && !!reciprocal),
-        conversationId:
-          existingConversation ? String(existingConversation._id) : own?.action === "like" && reciprocal
+        mutual:
+          !!existingConversation || (own?.action === "like" && !!reciprocal),
+        conversationId: existingConversation
+          ? String(existingConversation._id)
+          : own?.action === "like" && reciprocal
             ? await ensureMatch(req.userId!, card.id)
             : null,
         plans,
@@ -483,7 +490,7 @@ export function discoveryRouter() {
       !(await completion(String(req.params.id))).activated
     )
       throw fail(404, "Profile unavailable.");
-    await ProfileSwipe.findOneAndUpdate(
+    const swipe = await ProfileSwipe.findOneAndUpdate(
       { user: req.userId, target: req.params.id },
       {
         $set: {
@@ -491,7 +498,7 @@ export function discoveryRouter() {
           ...(body.action !== "like" ? { notificationReadAt: null } : {}),
         },
       },
-      { upsert: true, runValidators: true },
+      { upsert: true, runValidators: true, new: true },
     );
     const mutual =
       body.action === "like" &&
@@ -503,6 +510,19 @@ export function discoveryRouter() {
     const conversationId = mutual
       ? await ensureMatch(req.userId!, String(req.params.id))
       : null;
+    if (body.action === "like" && swipe) {
+      await enqueuePush({
+        key: `like:${swipe._id}`,
+        user: String(req.params.id),
+        actor: req.userId!,
+      });
+      if (conversationId)
+        await enqueuePush({
+          key: `match:${conversationId}`,
+          user: req.userId!,
+          actor: String(req.params.id),
+        });
+    }
     res.json({ data: { action: body.action, mutual, conversationId } });
   });
   return router;

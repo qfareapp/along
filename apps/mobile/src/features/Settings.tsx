@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
 import {
@@ -19,11 +19,13 @@ import { colors as c } from "../theme";
 import { useOnboarding } from "../store/useOnboarding";
 import { useQueryClient } from "@tanstack/react-query";
 import ActivityNotifications from "./ActivityNotifications";
+import { openPhoneNotificationSettings } from "../services/pushNotifications";
 
 export function Settings() {
   const client = useQueryClient();
   const state = useAlong();
   const [confirm, setConfirm] = useState(false);
+  const [notificationError, setNotificationError] = useState("");
   async function signout() {
     await clearSession();
     useOnboarding.getState().reset();
@@ -34,6 +36,24 @@ export function Settings() {
   return (
     <Screen>
       <Header title="Settings" back />
+      {!demoMode && Platform.OS === "android" && (
+        <View style={{ marginBottom: 12 }}>
+          <Button
+            variant="outline"
+            onPress={() => {
+              setNotificationError("");
+              void openPhoneNotificationSettings().catch(() =>
+                setNotificationError(
+                  "Could not open notification settings. Please try again.",
+                ),
+              );
+            }}
+          >
+            Phone notification settings
+          </Button>
+          {!!notificationError && <Notice>{notificationError}</Notice>}
+        </View>
+      )}
       <Button variant="outline" onPress={() => router.push("/social-settings")}>
         Social privacy & Close Circle
       </Button>

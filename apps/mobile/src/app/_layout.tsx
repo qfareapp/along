@@ -9,6 +9,7 @@ import { AccountSync } from "../services/account";
 import { MatchCelebration } from "../components/MatchCelebration";
 import { APP_MAX_WIDTH } from "../components/layout";
 import ScreenProtection from "../components/ScreenProtection";
+import { PushNotifications } from "../services/pushNotifications";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -28,6 +29,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <ScreenProtection />
         <AccountSync />
+        <PushNotifications />
         <StatusBar style="dark" />
         <View
           style={{

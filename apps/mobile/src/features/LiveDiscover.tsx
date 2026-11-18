@@ -1,8 +1,16 @@
-import React, { useEffect, useState, type ReactNode } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
+  Easing,
   Image,
   PanResponder,
   Platform,
@@ -206,14 +214,21 @@ function ProfileCard({
   member,
   busy,
   onAction,
+  depth = 0,
 }: {
   member: MemberCard;
   busy: boolean;
-  onAction: (action: SwipeAction) => Promise<void>;
+  onAction: (member: MemberCard, action: SwipeAction) => void;
+  depth?: number;
 }) {
   const layout = useAppLayout();
-  const [x] = useState(() => new Animated.Value(0)),
-    [reduced, setReduced] = useState(false);
+  const preview = depth > 0;
+  const [x] = useState(() => new Animated.Value(0));
+  const [y] = useState(() => new Animated.Value(0));
+  const [stack] = useState(() => new Animated.Value(depth));
+  const [reduced, setReduced] = useState(true);
+  const [leaving, setLeaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
     void AccessibilityInfo.isReduceMotionEnabled().then(setReduced);
     const sub = AccessibilityInfo.addEventListener(
@@ -222,44 +237,174 @@ function ProfileCard({
     );
     return () => sub.remove();
   }, []);
-  const reset = () => {
-    if (reduced) x.setValue(0);
+  useEffect(() => {
+    if (reduced) stack.setValue(depth);
     else
-      Animated.spring(x, {
-        toValue: 0,
+      Animated.spring(stack, {
+        toValue: depth,
+        stiffness: 280,
+        damping: 25,
+        mass: 0.8,
         useNativeDriver: true,
-        tension: 80,
-        friction: 12,
       }).start();
-  };
-  const pan = PanResponder.create({
-    onMoveShouldSetPanResponder: (_e, g) =>
-      !busy && Math.abs(g.dx) > 12 && Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
-    onPanResponderMove: (_e, g) => {
-      if (!busy) x.setValue(g.dx);
+    return () => stack.stopAnimation();
+  }, [depth, reduced, stack]);
+  useEffect(
+    () => () => {
+      x.stopAnimation();
+      y.stopAnimation();
     },
-    onPanResponderRelease: (_e, g) => {
-      reset();
-      if (!busy && Math.abs(g.dx) > 85)
-        void onAction(g.dx > 0 ? "like" : "pass");
+    [x, y],
+  );
+  const reset = useCallback(() => {
+    if (leaving) return;
+    if (reduced) {
+      x.setValue(0);
+      y.setValue(0);
+    } else
+      Animated.parallel(
+        [x, y].map((value) =>
+          Animated.spring(value, {
+            toValue: 0,
+            stiffness: 270,
+            damping: 24,
+            mass: 0.8,
+            useNativeDriver: true,
+          }),
+        ),
+      ).start();
+  }, [leaving, reduced, x, y]);
+  const choose = useCallback(
+    (action: SwipeAction) => {
+      if (busy || preview || leaving) return;
+      setLeaving(true);
+      const complete = () => onAction(member, action);
+      if (reduced) {
+        complete();
+        return;
+      }
+      const liked = action === "like";
+      const duration = liked ? 280 : 230;
+      Animated.parallel([
+        Animated.timing(x, {
+          toValue: (liked ? 1 : -1) * (layout.width + 120),
+          duration,
+          easing: Easing.out(liked ? Easing.quad : Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(y, {
+          toValue: liked ? -95 : 65,
+          duration,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished) complete();
+        else {
+          setLeaving(false);
+          reset();
+        }
+      });
     },
-    onPanResponderTerminate: reset,
+    [
+      busy,
+      preview,
+      leaving,
+      reduced,
+      member,
+      onAction,
+      layout.width,
+      x,
+      y,
+      reset,
+    ],
+  );
+  const gesture = useRef({ busy, preview, leaving, choose, reset });
+  useEffect(() => {
+    gesture.current = { busy, preview, leaving, choose, reset };
+  }, [busy, preview, leaving, choose, reset]);
+  const pan = useMemo(
+    () =>
+      // PanResponder registers these callbacks; it does not call them in render.
+      // Keep one responder while saves and animation state update around a drag.
+      // eslint-disable-next-line react-hooks/refs
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_e, g) =>
+          !gesture.current.busy &&
+          !gesture.current.preview &&
+          !gesture.current.leaving &&
+          Math.abs(g.dx) > 10 &&
+          Math.abs(g.dx) > Math.abs(g.dy) * 1.4,
+        onPanResponderGrant: () => {
+          setDragging(true);
+          x.stopAnimation();
+          y.stopAnimation();
+        },
+        onPanResponderMove: (_e, g) => {
+          if (!gesture.current.busy && !gesture.current.leaving)
+            x.setValue(g.dx);
+        },
+        onPanResponderRelease: (_e, g) => {
+          const flick =
+            Math.abs(g.dx) > 28 && Math.abs(g.vx) > 0.65 && g.dx * g.vx > 0;
+          if (Math.abs(g.dx) > 85 || flick)
+            gesture.current.choose(g.dx > 0 ? "like" : "pass");
+          else gesture.current.reset();
+        },
+        onPanResponderTerminate: () => gesture.current.reset(),
+        onPanResponderTerminationRequest: () => !gesture.current.leaving,
+      }),
+    [x, y],
+  );
+  const likeOpacity = x.interpolate({
+    inputRange: [0, 30, 110],
+    outputRange: [0, 0, 1],
+    extrapolate: "clamp",
+  });
+  const passOpacity = x.interpolate({
+    inputRange: [-110, -30, 0],
+    outputRange: [1, 0, 0],
+    extrapolate: "clamp",
   });
   return (
-    <View style={{ marginBottom: 42 }}>
+    <Animated.View
+      pointerEvents={preview ? "none" : "auto"}
+      accessibilityElementsHidden={preview}
+      importantForAccessibility={preview ? "no-hide-descendants" : "auto"}
+      aria-hidden={preview}
+      style={{
+        marginBottom: 42,
+        transform: [
+          {
+            translateY: stack.interpolate({
+              inputRange: [0, 2],
+              outputRange: [0, 18],
+            }),
+          },
+          {
+            scale: stack.interpolate({
+              inputRange: [0, 2],
+              outputRange: [1, 0.93],
+            }),
+          },
+        ],
+      }}
+    >
       <View>
         <Animated.View
-          testID="discovery-profile-card"
+          testID={preview ? "discovery-preview-card" : "discovery-profile-card"}
           {...pan.panHandlers}
           style={{
             transform: [
               { translateX: x },
+              { translateY: y },
               {
                 rotate: reduced
                   ? "0deg"
                   : x.interpolate({
                       inputRange: [-240, 0, 240],
-                      outputRange: ["-9deg", "0deg", "9deg"],
+                      outputRange: ["-16deg", "0deg", "12deg"],
+                      extrapolate: "clamp",
                     }),
               },
             ],
@@ -268,8 +413,11 @@ function ProfileCard({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${member.name}'s profile`}
-            disabled={busy}
-            onPress={() => router.push(`/person?id=${member.id}`)}
+            disabled={busy || preview || leaving}
+            onPressIn={() => setDragging(false)}
+            onPress={() => {
+              if (!dragging) router.push(`/person?id=${member.id}`);
+            }}
             style={{
               height: layout.isTablet
                 ? Math.max(340, Math.min(640, layout.height - 280))
@@ -380,51 +528,179 @@ function ProfileCard({
                 </Text>
               </View>
             </LinearGradient>
-          </Pressable>
-        </Animated.View>
-        <View
-          style={{
-            position: "absolute",
-            bottom: -31,
-            alignSelf: "center",
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 30,
-          }}
-        >
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Pass on ${member.name}`}
-            disabled={busy}
-            onPress={() => void onAction("pass")}
-            style={[actionStyle, { width: 68, height: 68 }]}
-          >
-            <Ionicons name="close-outline" color="#A2513E" size={31} />
-          </Pressable>
-          {member.vibeCheck && (
-            <VibeMatchButton
-              questions={member.vibeCheck.questionCount}
-              reduced={reduced}
-              disabled={busy}
-              onPress={() => router.push(`/vibe-check?id=${member.id}`)}
-            />
-          )}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Like ${member.name}`}
-            disabled={busy}
-            onPress={() => void onAction("like")}
-            style={[actionStyle, { width: 68, height: 68 }]}
-          >
-            {busy ? (
-              <ActivityIndicator color={c.teal} />
-            ) : (
-              <Ionicons name="heart" color={c.coralBright} size={31} />
+            {!reduced && !preview && (
+              <View
+                pointerEvents="none"
+                aria-hidden
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={{ position: "absolute", inset: 0 }}
+              >
+                <Animated.View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: "#EE8199",
+                    opacity: Animated.multiply(likeOpacity, 0.2),
+                  }}
+                />
+                <Animated.View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundColor: c.teal,
+                    opacity: Animated.multiply(passOpacity, 0.18),
+                  }}
+                />
+                <Animated.View
+                  testID="discovery-like-feedback"
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    top: 90,
+                    left: 22,
+                    opacity: likeOpacity,
+                    transform: [{ rotate: "-12deg" }],
+                  }}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      paddingHorizontal: 18,
+                      paddingVertical: 12,
+                      borderWidth: 3,
+                      borderColor: "#FFE4EC",
+                      borderRadius: 16,
+                      backgroundColor: "#B92D6088",
+                    }}
+                  >
+                    <Ionicons name="heart" color="#FFE4EC" size={30} />
+                    <Text
+                      style={{
+                        color: "#FFE4EC",
+                        fontSize: 27,
+                        fontWeight: "900",
+                        letterSpacing: 3,
+                      }}
+                    >
+                      LIKE
+                    </Text>
+                  </View>
+                </Animated.View>
+                <Animated.View
+                  testID="discovery-pass-feedback"
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    top: 90,
+                    right: 22,
+                    opacity: passOpacity,
+                    transform: [{ rotate: "12deg" }],
+                  }}
+                >
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 8,
+                      paddingHorizontal: 18,
+                      paddingVertical: 12,
+                      borderWidth: 3,
+                      borderColor: "#D4F1E9",
+                      borderRadius: 16,
+                      backgroundColor: "#064D4F99",
+                    }}
+                  >
+                    <Ionicons name="arrow-back" color="#D4F1E9" size={28} />
+                    <Text
+                      style={{
+                        color: "#D4F1E9",
+                        fontSize: 27,
+                        fontWeight: "900",
+                        letterSpacing: 3,
+                      }}
+                    >
+                      PASS
+                    </Text>
+                  </View>
+                </Animated.View>
+                {[0, 1, 2].map((index) => (
+                  <Animated.View
+                    key={index}
+                    pointerEvents="none"
+                    style={{
+                      position: "absolute",
+                      top: 180 + index * 48,
+                      right: 30 + index * 35,
+                      opacity: likeOpacity,
+                      transform: [
+                        {
+                          translateY: x.interpolate({
+                            inputRange: [0, 350],
+                            outputRange: [0, -70 - index * 18],
+                            extrapolate: "clamp",
+                          }),
+                        },
+                        { rotate: `${index * 18 - 15}deg` },
+                      ],
+                    }}
+                  >
+                    <Ionicons
+                      name="heart"
+                      color="#FFE4EC"
+                      size={24 + index * 8}
+                    />
+                  </Animated.View>
+                ))}
+              </View>
             )}
           </Pressable>
-        </View>
+        </Animated.View>
+        {!preview && (
+          <View
+            style={{
+              position: "absolute",
+              bottom: -31,
+              alignSelf: "center",
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 30,
+            }}
+          >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Pass on ${member.name}`}
+              disabled={busy || leaving}
+              onPress={() => choose("pass")}
+              style={[actionStyle, { width: 68, height: 68 }]}
+            >
+              <Ionicons name="close-outline" color="#A2513E" size={31} />
+            </Pressable>
+            {member.vibeCheck && (
+              <VibeMatchButton
+                questions={member.vibeCheck.questionCount}
+                reduced={reduced}
+                disabled={busy || leaving}
+                onPress={() => router.push(`/vibe-check?id=${member.id}`)}
+              />
+            )}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Like ${member.name}`}
+              disabled={busy || leaving}
+              onPress={() => choose("like")}
+              style={[actionStyle, { width: 68, height: 68 }]}
+            >
+              <Ionicons name="heart" color={c.coralBright} size={31} />
+            </Pressable>
+          </View>
+        )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 // Takes the middle action slot only for members with a Vibe Check.
@@ -591,6 +867,7 @@ export default function LiveDiscover() {
   );
 }
 function DiscoveryFeed() {
+  const layout = useAppLayout();
   const preferences = useCompletion().data?.profile.preferences;
   const radius = preferences?.maxDistanceKm;
   const unit = preferences?.distanceUnit ?? "km";
@@ -601,20 +878,47 @@ function DiscoveryFeed() {
   const client = useQueryClient(),
     [cityOnly, setCityOnly] = useState(true),
     [filters, setFilters] = useState(false),
-    [busy, setBusy] = useState(false),
+    [pendingCount, setPendingCount] = useState(0),
     [refreshing, setRefreshing] = useState(false),
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const pending = useRef(new Set<string>());
+  const replenished = useRef("");
   const key = ["discovery", cityOnly];
   const feed = useQuery({
     queryKey: key,
     queryFn: () => api<MemberCard[]>(`/discovery?cityOnly=${cityOnly}`),
     retry: false,
   });
-  const member = feed.data?.[0];
+  const candidates =
+    feed.data?.filter((profile) => !dismissed.has(profile.id)) ?? [];
+  const member = candidates[0];
   const likedMe = useLikedMe();
+  const { refetch: refetchFeed, isFetching: fetchingFeed } = feed;
+  useEffect(() => {
+    // Refill near the end, without putting a request between individual cards.
+    const batch = `${cityOnly}:${dismissed.size}`;
+    if (
+      !dismissed.size ||
+      candidates.length > 3 ||
+      pendingCount ||
+      fetchingFeed ||
+      replenished.current === batch
+    )
+      return;
+    replenished.current = batch;
+    void refetchFeed();
+  }, [
+    cityOnly,
+    dismissed.size,
+    candidates.length,
+    pendingCount,
+    fetchingFeed,
+    refetchFeed,
+  ]);
   async function refresh() {
-    if (refreshing || busy) return;
+    if (refreshing || pendingCount) return;
     setRefreshing(true);
     setError("");
     try {
@@ -627,41 +931,61 @@ function DiscoveryFeed() {
       setRefreshing(false);
     }
   }
-  async function act(action: SwipeAction) {
-    if (!member || busy || refreshing) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await actOnProfile(member.id, action);
-      if (result.mutual) {
-        useMatchCelebration.getState().show({
-          name: member.name,
-          photoId: member.photoIds[0],
-          conversationId: result.conversationId,
+  const act = useCallback(
+    async (member: MemberCard, action: SwipeAction) => {
+      if (refreshing || pending.current.has(member.id)) return;
+      pending.current.add(member.id);
+      setDismissed((previous) => new Set(previous).add(member.id));
+      setPendingCount((count) => count + 1);
+      setError("");
+      setNotice("");
+      try {
+        const result = await actOnProfile(member.id, action);
+        if (result.mutual) {
+          useMatchCelebration.getState().show({
+            name: member.name,
+            photoId: member.photoIds[0],
+            conversationId: result.conversationId,
+          });
+          void client.invalidateQueries({ queryKey: ["conversations"] });
+        }
+        client.setQueriesData<MemberCard[]>(
+          { queryKey: ["discovery"] },
+          (previous) => previous?.filter((v) => v.id !== member.id) ?? [],
+        );
+        // These lists refresh in the background; they never block another swipe.
+        void client.invalidateQueries({ queryKey: ["profile-likes"] });
+        void client.invalidateQueries({ queryKey: ["liked-me"] });
+        void client.invalidateQueries({
+          queryKey: ["profile-like-notifications"],
         });
-        void client.invalidateQueries({ queryKey: ["conversations"] });
+      } catch (e) {
+        // Restore only this failed choice, preserving every later swipe. Put it at
+        // the back so a late network error cannot replace a card mid-gesture.
+        client.setQueryData<MemberCard[]>(
+          ["discovery", cityOnly],
+          (previous) => [
+            ...(previous ?? []).filter((profile) => profile.id !== member.id),
+            member,
+          ],
+        );
+        setDismissed((previous) => {
+          const restored = new Set(previous);
+          restored.delete(member.id);
+          return restored;
+        });
+        setError(
+          `${member.name}'s choice wasn't saved. Their profile is back in your deck. ${
+            e instanceof Error ? e.message : "Please try again."
+          }`,
+        );
+      } finally {
+        pending.current.delete(member.id);
+        setPendingCount((count) => count - 1);
       }
-      client.setQueriesData<MemberCard[]>(
-        { queryKey: ["discovery"] },
-        (previous) => previous?.filter((v) => v.id !== member.id) ?? [],
-      );
-      await client.invalidateQueries({ queryKey: ["profile-likes"] });
-      await client.invalidateQueries({ queryKey: ["liked-me"] });
-      await client.invalidateQueries({
-        queryKey: ["profile-like-notifications"],
-      });
-      if (feed.data?.length === 1) void feed.refetch();
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Couldn't save your choice. Try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+    [client, cityOnly, refreshing],
+  );
   return (
     <Screen
       width="reading"
@@ -728,7 +1052,7 @@ function DiscoveryFeed() {
       )}
       {feed.isPending ? (
         <ActivityIndicator color={c.teal} style={{ margin: 60 }} />
-      ) : feed.error ? (
+      ) : feed.error && !feed.data ? (
         <Empty title="Couldn't load profiles" description={feed.error.message}>
           <Button onPress={() => void refresh()}>Try Again</Button>
         </Empty>
@@ -736,18 +1060,47 @@ function DiscoveryFeed() {
         <>
           <DeckStatus
             member={member}
-            mutualLeft={feed.data?.filter((v) => v.mutualMatch).length ?? 0}
+            mutualLeft={candidates.filter((v) => v.mutualMatch).length}
           />
-          <ProfileCard
-            key={member.id}
-            member={member}
-            busy={busy || refreshing}
-            onAction={act}
-          />
+          <View
+            testID="discovery-deck"
+            style={{
+              height:
+                (layout.isTablet
+                  ? Math.max(340, Math.min(640, layout.height - 280))
+                  : 505) + 42,
+              marginBottom: 8,
+            }}
+          >
+            {candidates.slice(0, 3).map((profile, depth) => (
+              <View
+                key={profile.id}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  zIndex: 3 - depth,
+                }}
+              >
+                <ProfileCard
+                  member={profile}
+                  depth={depth}
+                  busy={refreshing}
+                  onAction={act}
+                />
+              </View>
+            ))}
+          </View>
           <Text style={[text.muted, { textAlign: "center" }]}>
             Swipe left to pass, right to like. Tap a profile to learn more.
           </Text>
         </>
+      ) : pendingCount > 0 || feed.isFetching ? (
+        <View style={{ alignItems: "center", padding: 48, gap: 14 }}>
+          <ActivityIndicator color={c.teal} />
+          <Text style={text.muted}>Getting your next profiles ready…</Text>
+        </View>
       ) : (
         <Empty
           icon="people-outline"

@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
 import { apiRequest } from "./apiRequest";
+import { clearPushRegistration } from "./pushSession";
 
 export const demoMode = process.env.EXPO_PUBLIC_DEMO_MODE !== "false";
 const baseUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -54,6 +55,7 @@ export async function storeSession(accessToken: string, refreshToken: string) {
   await SecureStore.setItemAsync("along.refresh", refreshToken);
 }
 export async function clearSession() {
+  await clearPushRegistration().catch(() => {});
   webAccessToken = null;
   webRefreshToken = null;
   if (Platform.OS !== "web")

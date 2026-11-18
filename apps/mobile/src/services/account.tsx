@@ -8,6 +8,7 @@ import type { Completion } from "./onboarding";
 export type Account = {
   completion?: Completion;
   user: {
+    _id: string;
     name: string;
     email?: string;
     emailVerified?: boolean;

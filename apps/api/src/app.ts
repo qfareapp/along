@@ -16,6 +16,7 @@ import { socialRouter } from "./social.js";
 import { playRouter } from "./play.js";
 import { planGroupsRouter } from "./plan-groups.js";
 import { vibeChecksRouter } from "./vibe-checks.js";
+import { pushDevicesRouter, PushDevice } from "./push.js";
 import { preparePlanAudience } from "./plan-audience.js";
 import { activitiesRouter, activityScope } from "./activities.js";
 import {
@@ -112,6 +113,7 @@ export function createApp() {
   app.use("/api/v1/games", playRouter());
   app.use("/api/v1/plan-groups", planGroupsRouter());
   app.use("/api/v1/vibe-checks", vibeChecksRouter());
+  app.use("/api/v1/push-devices", pushDevicesRouter());
   app.use("/api/v1/activities", activitiesRouter());
   const onboarding = onboardingRouter();
   app.use("/api/v1", (req, res, next) => {
@@ -246,6 +248,7 @@ export function createApp() {
         },
       );
       await RefreshSession.deleteMany({ user: user._id });
+      await PushDevice.deleteMany({ user: user._id });
       const photos = await ProfilePhoto.find({ owner: user._id }).select(
         "+cloudinaryPublicId",
       );

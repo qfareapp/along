@@ -17,6 +17,7 @@ import { compatibleProfiles } from "./discovery.js";
 import { fail, requireReady, vibeCategories } from "./onboarding.js";
 import { ensureMatch, pairKey } from "./chat.js";
 import { addAcceptedGroupMember } from "./plan-group-service.js";
+import { enqueuePush } from "./push.js";
 import { config } from "./config.js";
 import { socialScope } from "./social.js";
 import { planAudienceVisibility } from "./plan-audience.js";
@@ -83,10 +84,7 @@ export async function activityScope(userId: string) {
   })
     .sort({ displayOrder: 1, name: 1 })
     .lean();
-  const creators = [
-    new mongoose.Types.ObjectId(userId),
-    ...filter.user.$in,
-  ];
+  const creators = [new mongoose.Types.ObjectId(userId), ...filter.user.$in];
   const legacyCreators = [
     new mongoose.Types.ObjectId(userId),
     ...profiles.map((p) => p.user),
@@ -161,22 +159,38 @@ async function serializePlans(
   // Private agreements reuse the participants' existing direct chat. The
   // creator is also a participant, so resolve the other person for either role.
   const privatePair = (row: Record<string, any>) => {
-    if (row.visibility !== "private" ||
-        !row.participants?.some((p: unknown) => String(p) === userId)) return null;
+    if (
+      row.visibility !== "private" ||
+      !row.participants?.some((p: unknown) => String(p) === userId)
+    )
+      return null;
     const other = row.participants.find((p: unknown) => String(p) !== userId);
     return other ? pairKey(userId, String(other)) : null;
   };
-  const privatePairs = rows.map(privatePair).filter((key): key is string => !!key);
+  const privatePairs = rows
+    .map(privatePair)
+    .filter((key): key is string => !!key);
   const privateMatches = privatePairs.length
     ? await Match.find({ pairKey: { $in: privatePairs }, active: true })
-        .select("pairKey").lean()
+        .select("pairKey")
+        .lean()
     : [];
   const privateChats = privateMatches.length
-    ? await Conversation.find({ match: { $in: privateMatches.map(m => m._id) } })
-        .select("match").lean()
+    ? await Conversation.find({
+        match: { $in: privateMatches.map((m) => m._id) },
+      })
+        .select("match")
+        .lean()
     : [];
-  const chatByMatch = new Map(privateChats.map(chat => [String(chat.match), String(chat._id)]));
-  const privateChatByPair = new Map(privateMatches.map(match => [match.pairKey, chatByMatch.get(String(match._id))]));
+  const chatByMatch = new Map(
+    privateChats.map((chat) => [String(chat.match), String(chat._id)]),
+  );
+  const privateChatByPair = new Map(
+    privateMatches.map((match) => [
+      match.pairKey,
+      chatByMatch.get(String(match._id)),
+    ]),
+  );
   const photoIds = profiles
     .flatMap((p) => p.photos)
     .filter((id) => mongoose.isObjectIdOrHexString(id));
@@ -250,9 +264,12 @@ async function serializePlans(
         saved: saved.has(String(a._id)),
         interested: !!interest,
         interestStatus: interest?.status ?? (interest ? "pending" : null),
-        conversationId: a.visibility === "private"
-          ? privateChatByPair.get(privatePair(a) ?? "") ?? null
-          : interest?.conversation ? String(interest.conversation) : null,
+        conversationId:
+          a.visibility === "private"
+            ? (privateChatByPair.get(privatePair(a) ?? "") ?? null)
+            : interest?.conversation
+              ? String(interest.conversation)
+              : null,
         isOwner: String(a.creator) === userId,
         creator: {
           _id: String(u._id),
@@ -371,6 +388,14 @@ export async function acceptActivityInterest(
           ownerId,
           session,
         );
+      await enqueuePush(
+        {
+          key: `interest:${interest._id}:accepted`,
+          user: String(interest.user),
+          actor: ownerId,
+        },
+        session,
+      );
       return conversation;
     });
   } finally {
@@ -804,6 +829,12 @@ export function activitiesRouter() {
       },
       { upsert: true, new: true },
     );
+    if (interest)
+      await enqueuePush({
+        key: `interest:${interest._id}:pending`,
+        user: String(activity.creator),
+        actor: req.userId!,
+      });
     res.status(201).json({ data: interest });
   });
   router.post("/:id/save", async (req: AuthedRequest, res) => {
@@ -837,6 +868,11 @@ export function activitiesRouter() {
         { $set: { status: "declined", readAt: new Date() } },
       );
       if (!interest) throw fail(409, "Request already handled.");
+      await enqueuePush({
+        key: `interest:${interest._id}:declined`,
+        user: String(interest.user),
+        actor: req.userId!,
+      });
       res.status(204).end();
     },
   );

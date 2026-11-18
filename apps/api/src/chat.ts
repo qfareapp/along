@@ -7,6 +7,7 @@ import { compressPhoto } from "./compress-photo.js";
 import { rateLimit } from "express-rate-limit";
 import { memberRateKey, rateLimitMessage } from "./rate-limits.js";
 import { chatEvents } from "./chat-events.js";
+import { enqueuePush } from "./push.js";
 import { authenticate, type AuthedRequest } from "./auth.js";
 import { config } from "./config.js";
 import {
@@ -432,7 +433,7 @@ export function chatRouter() {
       .object({ text: z.string().trim().min(1).max(2000) })
       .strict()
       .parse(req.body);
-    const { conversation } = await openConversation(
+    const { conversation, otherId } = await openConversation(
       userId,
       String(req.params.id),
     );
@@ -446,6 +447,14 @@ export function chatRouter() {
       { _id: conversation._id },
       { $set: { updatedAt: new Date() } },
     );
+    await enqueuePush({
+      key: `message:${message._id}`,
+      user: otherId,
+      actor: userId,
+      kind: "message",
+      target: String(conversation._id),
+      message: String(message._id),
+    });
     res.status(201).json({ data: serialize(message.toObject(), userId) });
     chatEvents.emit("changed", String(conversation._id));
   });
@@ -456,7 +465,7 @@ export function chatRouter() {
     receiveAttachment,
     async (req: AuthedRequest, res) => {
       const userId = req.userId!;
-      const { conversation } = await openConversation(
+      const { conversation, otherId } = await openConversation(
         userId,
         String(req.params.id),
       );
@@ -523,6 +532,14 @@ export function chatRouter() {
         { _id: conversation._id },
         { $set: { updatedAt: new Date() } },
       );
+      await enqueuePush({
+        key: `message:${message._id}`,
+        user: otherId,
+        actor: userId,
+        kind: "message",
+        target: String(conversation._id),
+        message: String(message._id),
+      });
       res.status(201).json({ data: serialize(message.toObject(), userId) });
       chatEvents.emit("changed", String(conversation._id));
     },

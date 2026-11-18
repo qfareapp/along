@@ -6,6 +6,7 @@ import { cleanupSocial } from "./social.js";
 import { initializePlay } from "./play-bank.js";
 import { attachPlaySockets } from "./play-sockets.js";
 import { setTimeout as delay } from "node:timers/promises";
+import { PushDevice, PushJob, startPushWorker } from "./push.js";
 
 mongoose.set("bufferCommands", false);
 const shutdownController = new AbortController();
@@ -27,6 +28,7 @@ async function connectDatabase() {
         return;
       }
       console.log("MongoDB connected");
+      await Promise.all([PushDevice.init(), PushJob.init()]);
       await initializeCategories();
       await initializePlay();
       return;
@@ -48,6 +50,7 @@ const server = createApp().listen(config.PORT, "0.0.0.0", () =>
   console.log(`Along API listening on port ${config.PORT}`),
 );
 const playSockets = attachPlaySockets(server);
+const stopPushWorker = startPushWorker();
 void connectDatabase();
 let cleaningSocial = false;
 const socialCleanup = setInterval(() => {
@@ -64,6 +67,7 @@ const socialCleanup = setInterval(() => {
 }, 60000);
 socialCleanup.unref();
 async function shutdown() {
+  stopPushWorker();
   clearInterval(socialCleanup);
   shutdownController.abort();
   await playSockets.close();
