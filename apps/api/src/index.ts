@@ -7,6 +7,8 @@ import { initializePlay } from "./play-bank.js";
 import { attachPlaySockets } from "./play-sockets.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { PushDevice, PushJob, startPushWorker } from "./push.js";
+import { Airport, AirportSession, AirportConnection, AirportNotice } from "./airport-models.js";
+import { cleanupAirportVisits } from "./airports.js";
 
 mongoose.set("bufferCommands", false);
 const shutdownController = new AbortController();
@@ -28,7 +30,7 @@ async function connectDatabase() {
         return;
       }
       console.log("MongoDB connected");
-      await Promise.all([PushDevice.init(), PushJob.init()]);
+      await Promise.all([PushDevice.init(), PushJob.init(), Airport.init(), AirportSession.init(), AirportConnection.init(), AirportNotice.init()]);
       await initializeCategories();
       await initializePlay();
       return;
@@ -56,7 +58,7 @@ let cleaningSocial = false;
 const socialCleanup = setInterval(() => {
   if (mongoose.connection.readyState === 1 && !cleaningSocial) {
     cleaningSocial = true;
-    void cleanupSocial()
+    void Promise.all([cleanupSocial(), cleanupAirportVisits()])
       .catch(() =>
         console.error("Social cleanup failed; retrying next minute."),
       )

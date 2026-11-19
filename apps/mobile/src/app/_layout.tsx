@@ -10,6 +10,7 @@ import { MatchCelebration } from "../components/MatchCelebration";
 import { APP_MAX_WIDTH } from "../components/layout";
 import ScreenProtection from "../components/ScreenProtection";
 import { PushNotifications } from "../services/pushNotifications";
+import { AirportLifecycle } from "../components/AirportLifecycle";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -30,6 +31,7 @@ export default function RootLayout() {
         <ScreenProtection />
         <AccountSync />
         <PushNotifications />
+        <AirportLifecycle />
         <StatusBar style="dark" />
         <View
           style={{

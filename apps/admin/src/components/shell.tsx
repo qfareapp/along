@@ -42,6 +42,7 @@ const navigation = [
   ["Categories", "/categories", Shapes, "categories.manage"],
   ["Matching rules", "/matching", HeartHandshake, "matching.configure"],
   ["Along Play", "/along-play", Gamepad2, "settings.manage"],
+  ["Airport Mode", "/airports", CalendarDays, "settings.manage"],
   ["Admin roles", "/admin-roles", Users, "admins.manage"],
   ["Audit trail", "/audit-logs", ScrollText, "audit.read"],
   ["System health", "/system-health", SlidersHorizontal, "system.read"],

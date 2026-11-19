@@ -41,7 +41,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Use your location to find people within your preferred dating distance."
+          "locationWhenInUsePermission": "Use your location to find nearby people and supported airports when you choose Airport Mode."
         }
       ],
       [

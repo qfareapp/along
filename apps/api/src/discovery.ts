@@ -104,7 +104,7 @@ export async function compatibleProfiles(userId: string) {
     },
   };
 }
-async function publicCards(profiles: InstanceType<typeof Profile>[]) {
+export async function publicCards(profiles: InstanceType<typeof Profile>[]) {
   const ids = profiles.map((p) => p.user);
   const users = await User.find({
     _id: { $in: ids },
@@ -415,10 +415,15 @@ export function discoveryRouter() {
     if (!mongoose.isObjectIdOrHexString(req.params.id))
       throw fail(404, "Profile unavailable.");
     const { filter } = await compatibleProfiles(req.userId!);
-    const profiles = await Profile.find({
+    let profiles = await Profile.find({
       ...filter,
       user: { ...filter.user, $eq: req.params.id },
     }).limit(1);
+    const acceptedConnection = !profiles.length && await Match.exists({ users: { $all: [req.userId!, req.params.id] }, active: true });
+    if (acceptedConnection) {
+      const { airportPairAllowed } = await import("./airports.js");
+      if (await airportPairAllowed(req.userId!, String(req.params.id))) profiles = await Profile.find({ user: req.params.id }).limit(1);
+    }
     const [card] = await publicCards(profiles);
     if (!card) throw fail(404, "Profile unavailable.");
     const { mutualFilter } = await compatibleProfiles(req.userId!);
@@ -458,6 +463,7 @@ export function discoveryRouter() {
     res.json({
       data: {
         ...card,
+        ...(acceptedConnection ? { vibeCheck: null } : {}),
         mutualMatch: !!mutualMatch,
         action: own?.action === "pass" ? undefined : own?.action,
         mutual:

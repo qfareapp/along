@@ -234,6 +234,26 @@ export function planStatus(plan: PlanRecord) {
     return { label: `${plan.placesLeft} places open`, color: c.green };
   return { label: "Open to company", color: c.green };
 }
+function planWhen(startsAt: string) {
+  const date = new Date(startsAt);
+  const now = new Date();
+  const time = date.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const dayDiff = Math.round(
+    (new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime() -
+      new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) /
+      86400000,
+  );
+  if (dayDiff === 0) return `Today, ${time}`;
+  if (dayDiff === 1) return `Tomorrow, ${time}`;
+  return `${date.toLocaleDateString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  })}, ${time}`;
+}
 export const PeoplePlanCard = memo(function PeoplePlanCard({
   plan,
 }: {
@@ -257,38 +277,22 @@ export const PeoplePlanCard = memo(function PeoplePlanCard({
           pressed && { transform: [{ scale: 0.99 }], opacity: 0.9 },
         ]}
       >
-        <View>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <MemberPhoto
-              id={plan.creator.photoId ?? undefined}
-              style={{ width: 48, height: 48, borderRadius: 16 }}
-            />
-            <View style={{ flex: 1 }}>
-              <View
-                style={{ flexDirection: "row", gap: 5, alignItems: "center" }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[text.label, { fontSize: 15, flexShrink: 1 }]}
-                >
-                  {plan.creator.name}
-                  {plan.creator.age ? `, ${plan.creator.age}` : ""}
-                </Text>
-                {plan.creator.identityVerified && (
-                  <Ionicons name="checkmark-circle" size={15} color="#1597F5" />
-                )}
-              </View>
-              <Text style={[text.muted, { fontSize: 11, lineHeight: 16 }]}>
-                {group
-                  ? "A little company, a shared plan"
-                  : "One plan. A new connection."}
-              </Text>
-            </View>
+        <MemberPhoto id={plan.creator.photoId ?? undefined} style={s.photo} />
+        <View style={s.info}>
+          <View style={s.nameRow}>
+            <Text numberOfLines={1} style={s.name}>
+              {plan.creator.name}
+              {plan.creator.age ? `, ${plan.creator.age}` : ""}
+            </Text>
+            {plan.creator.identityVerified && (
+              <Ionicons name="checkmark-circle" size={16} color="#1597F5" />
+            )}
+            <View style={{ flex: 1 }} />
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={plan.saved ? "Unsave plan" : "Save plan"}
               disabled={busy}
-              hitSlop={6}
+              hitSlop={8}
               onPress={(event) => {
                 event.stopPropagation();
                 setBusy(true);
@@ -301,68 +305,40 @@ export const PeoplePlanCard = memo(function PeoplePlanCard({
             >
               <Ionicons
                 name={plan.saved ? "bookmark" : "bookmark-outline"}
-                size={18}
+                size={16}
                 color={plan.saved ? c.coral : c.teal}
               />
             </Pressable>
           </View>
-          <View style={{ marginTop: 14, marginBottom: 8 }}>
-            <PlanTypeBadge type={plan.type} />
-          </View>
-          <Text
-            style={[text.title, { fontSize: 18, lineHeight: 24 }]}
-            numberOfLines={2}
-          >
-            {plan.title}
+          <Text numberOfLines={1} style={s.when}>
+            {planWhen(plan.startsAt)}
+            {plan.recurring ? " · Recurring" : ""}
           </Text>
-          {!!plan.highlight && (
-            <Text
-              style={[text.muted, { marginTop: 4, fontSize: 13 }]}
-              numberOfLines={2}
-            >
-              {plan.highlight}
-            </Text>
-          )}
-          <View style={s.metaRow}>
-            <View style={s.metaChip}>
-              <Ionicons name="location-outline" size={13} color={c.teal} />
-              <Text style={s.meta} numberOfLines={1}>
-                {plan.zone}
-              </Text>
+          <Text numberOfLines={2} style={s.title}>
+            {`“${plan.title}”`}
+          </Text>
+          <View style={s.chips}>
+            <PlanTypeBadge type={plan.type} />
+            <View style={s.chip2}>
+              <Ionicons
+                name={group ? "people-outline" : "person-outline"}
+                size={13}
+                color={c.charcoal}
+              />
+              <Text style={s.chipText}>{group ? "Group" : "1:1"}</Text>
             </View>
-            <View style={s.metaChip}>
-              <Ionicons name="calendar-outline" size={13} color={c.teal} />
-              <Text style={s.meta} numberOfLines={1}>
-                {new Date(plan.startsAt).toLocaleString([], {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}
-                {plan.recurring ? " · Recurring" : ""}
-              </Text>
-            </View>
+            {!!plan.zone && (
+              <View style={[s.chip2, { flexShrink: 1 }]}>
+                <Ionicons name="location-outline" size={13} color={c.charcoal} />
+                <Text style={[s.chipText, { flexShrink: 1 }]} numberOfLines={1}>
+                  {plan.zone}
+                </Text>
+              </View>
+            )}
           </View>
-        </View>
-        <View style={s.footer}>
-          <View style={s.pill}>
-            <Ionicons
-              name={group ? "people-outline" : "person-outline"}
-              size={12}
-              color={c.teal}
-            />
-            <Text style={s.pillText}>
-              {group ? "Small group" : "One-on-one"}
-            </Text>
-          </View>
-          <View style={[s.liveDot, { backgroundColor: status.color }]} />
-          <Text
-            numberOfLines={1}
-            style={{ fontSize: 11, color: status.color, flex: 1 }}
-          >
+          <Text numberOfLines={1} style={[s.status, { color: status.color }]}>
             {status.label}
           </Text>
-          <Ionicons name="arrow-forward" color={c.teal} size={16} />
         </View>
       </Pressable>
       {!!error && (
@@ -491,48 +467,57 @@ const s = StyleSheet.create({
   },
   plan: {
     flex: 1,
-    padding: 16,
-    borderRadius: 22,
-    justifyContent: "space-between",
+    flexDirection: "row",
+    gap: 14,
+    padding: 10,
+    borderRadius: 24,
+  },
+  photo: {
+    width: 116,
+    aspectRatio: 3 / 4,
+    alignSelf: "flex-start",
+    borderRadius: 18,
+  },
+  info: { flex: 1, minWidth: 0, paddingVertical: 4, paddingRight: 2 },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  name: {
+    flexShrink: 1,
+    fontSize: 19,
+    fontWeight: "700",
+    color: c.charcoal,
   },
   save: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: c.soft,
   },
-  metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 12 },
-  metaChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    maxWidth: "100%",
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: "#FBF3EC",
+  when: { marginTop: 2, fontSize: 13, color: c.muted },
+  title: {
+    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "500",
+    color: c.charcoal,
   },
-  meta: { color: c.teal, fontSize: 11, flexShrink: 1 },
-  footer: {
+  chips: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-    marginTop: 14,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderColor: c.line,
+    flexWrap: "wrap",
+    gap: 6,
+    marginTop: 10,
   },
-  pill: {
+  chip2: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: c.soft,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    marginRight: 4,
+    maxWidth: "100%",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#F1EEEB",
   },
-  pillText: { color: c.teal, fontSize: 10, fontWeight: "600" },
+  chipText: { fontSize: 11, fontWeight: "600", color: c.charcoal },
+  status: { marginTop: 10, fontSize: 13, fontWeight: "600" },
 });

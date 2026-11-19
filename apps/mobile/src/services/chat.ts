@@ -39,6 +39,8 @@ export type ConversationSummary = {
   unread: number;
 };
 export type ConversationThread = {
+  airportConnection?: boolean;
+  airportPaused?: boolean;
   activityConnection?: boolean;
   id: string;
   matchedAt: string;

@@ -127,6 +127,13 @@ export async function openConversation(userId: string, id: string) {
   if (!mongoose.isObjectIdOrHexString(id))
     throw fail(404, "Conversation unavailable.");
   const conversation = await Conversation.findById(id).lean();
+  if (conversation?.airportConnection) {
+    const { airportConnectionAccess } = await import("./airports.js");
+    const { grant, otherId, canSend } = await airportConnectionAccess(userId, conversation.airportConnection);
+    const other = await User.findOne({ _id: otherId, status: "active", adminRole: null }).select("name identityVerified").lean();
+    if (!other) throw fail(404, "Conversation unavailable.");
+    return { conversation, match: { _id: grant._id, users: grant.users, active: true, activity: undefined, createdAt: grant.createdAt, updatedAt: grant.updatedAt }, other, otherId, airportCanSend: canSend };
+  }
   const match = conversation
     ? await Match.findById(conversation.match).lean()
     : null;
@@ -145,7 +152,7 @@ export async function openConversation(userId: string, id: string) {
   ]);
   if (!other || blocked.has(otherId))
     throw fail(404, "Conversation unavailable.");
-  return { conversation, match, other, otherId };
+  return { conversation, match, other, otherId, airportCanSend: true };
 }
 
 const serialize = (
@@ -244,6 +251,11 @@ export async function assertCanSend(
   conversation: { _id: unknown; firstSender?: unknown },
 ) {
   const me = await User.findById(userId).select("restrictions").lean();
+  const record = await Conversation.findById(conversation._id).select("airportConnection").lean();
+  if (record?.airportConnection) {
+    const { airportConnectionAccess } = await import("./airports.js");
+    await airportConnectionAccess(userId, record.airportConnection, true);
+  }
   if (me?.restrictions?.messaging)
     throw fail(403, "Messaging is restricted. Contact support to appeal.");
   if (
@@ -371,6 +383,18 @@ export function chatRouter() {
         };
       }),
     );
+    const { AirportConnection } = await import("./airport-models.js");
+    const airportGrants = await AirportConnection.find({ users: userId, state: "connected", decisionUntil: { $gt: new Date() }, conversation: { $exists: true } }).lean();
+    for (const grant of airportGrants) {
+      try {
+        const { conversation, other, otherId } = await openConversation(userId, String(grant.conversation));
+        const last = await Message.findOne({ conversation: conversation._id }).sort({ _id: -1 }).lean();
+        const unread = await Message.countDocuments({ conversation: conversation._id, sender: { $ne: userId }, readAt: null });
+        rows.push({ id: String(conversation._id), matchedAt: grant.createdAt, activityConnection: true, member: { id: otherId, name: other.name, identityVerified: other.identityVerified, photoId: (await mainPhotos([otherId])).get(otherId) ?? null }, lastMessage: last ? serialize(last, userId) : null, unread });
+      } catch (error) {
+        if (![403, 404].includes((error as { status?: number }).status ?? 0)) throw error;
+      }
+    }
     const data = rows
       .filter((r) => !!r)
       .sort(
@@ -383,7 +407,7 @@ export function chatRouter() {
 
   router.get("/:id", async (req: AuthedRequest, res) => {
     const userId = req.userId!;
-    const { conversation, match, other, otherId } = await openConversation(
+    const { conversation, match, other, otherId, airportCanSend } = await openConversation(
       userId,
       String(req.params.id),
     );
@@ -407,11 +431,14 @@ export function chatRouter() {
         id: String(conversation._id),
         matchedAt: match.createdAt,
         activityConnection: !!match.activity,
+        airportConnection: !!conversation.airportConnection,
+        airportPaused: !!conversation.airportConnection && !airportCanSend,
         waitingForOwner:
           !!conversation.firstSender &&
           String(conversation.firstSender) !== userId &&
           !(await Message.exists({ conversation: conversation._id })),
         canSend:
+          airportCanSend &&
           !me?.restrictions?.messaging &&
           (!conversation.firstSender ||
             String(conversation.firstSender) === userId ||
@@ -588,11 +615,14 @@ export function chatRouter() {
   );
 
   router.post("/:id/unmatch", async (req: AuthedRequest, res) => {
-    const { match } = await openConversation(
+    const { match, conversation } = await openConversation(
       req.userId!,
       String(req.params.id),
     );
-    await Match.updateOne({ _id: match._id }, { $set: { active: false } });
+    if (conversation.airportConnection) {
+      const { AirportConnection } = await import("./airport-models.js");
+      await AirportConnection.updateOne({ _id: conversation.airportConnection }, { $set: { state: "ended" } });
+    } else await Match.updateOne({ _id: match._id }, { $set: { active: false } });
     res.status(204).end();
   });
 

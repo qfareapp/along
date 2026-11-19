@@ -5,6 +5,7 @@ import { Roles, Settings, SystemHealth } from "@/components/operations";
 import { Resource } from "@/components/resource";
 import { SocialModeration } from "@/components/social";
 import { AlongPlayAdmin } from "@/components/play";
+import { AirportManagement } from "@/components/airports";
 export default async function ModulePage({
   params,
 }: {
@@ -13,6 +14,7 @@ export default async function ModulePage({
   const { module } = await params;
   if (module === "social") return <SocialModeration />;
   if (module === "along-play") return <AlongPlayAdmin />;
+  if (module === "airports") return <AirportManagement />;
   if (module === "categories") return <Categories />;
   if (module === "matching") return <Matching />;
   if (module === "admin-roles") return <Roles />;

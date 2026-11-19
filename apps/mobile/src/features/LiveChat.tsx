@@ -404,7 +404,7 @@ export function LiveConversation({ id }: { id?: string }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${member.name}'s profile`}
-            onPress={() => router.push(`/person?id=${member.id}`)}
+            onPress={() => router.push(`${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`)}
             style={[s.row, { flex: 1, gap: 10 }]}
           >
             <MemberPhoto
@@ -448,7 +448,7 @@ export function LiveConversation({ id }: { id?: string }) {
             <MenuRow
               icon="person-circle-outline"
               label="View profile"
-              onPress={() => router.push(`/person?id=${member.id}`)}
+              onPress={() => router.push(`${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`)}
             />
             <MenuRow
               icon="shield-checkmark-outline"
@@ -864,7 +864,7 @@ export function LiveConversation({ id }: { id?: string }) {
         ) : (
           <View style={{ padding: 15, paddingBottom: 15 + bottom }}>
             <Notice>
-              {data.waitingForOwner
+              {data.airportPaused ? "Your airport visit together ended. Both choose Stay connected to keep chatting." : data.waitingForOwner
                 ? "The activity owner will send the first message. You can reply once they say hello."
                 : "Messaging is restricted on your account. Contact support to appeal."}
             </Notice>

@@ -1,4 +1,7 @@
 import React, { useState, type ReactNode } from "react";
+import { AirportRequests } from "./AirportMode";
+import { AirportNotifications } from "./AirportNotifications";
+import { useAirportNotices } from "../services/airports";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -68,6 +71,7 @@ function useActivityNotifications() {
   });
 }
 export function NotificationBell() {
+  const airport = useAirportNotices();
   const notifications = useActivityNotifications();
   const social = useSocialNotifications();
   const profileLikes = useProfileLikeNotifications();
@@ -76,7 +80,8 @@ export function NotificationBell() {
     (notifications.data?.filter((n) => !n.readAt).length ?? 0) +
     (social.data?.filter((n) => !n.readAt).length ?? 0) +
     (profileLikes.data?.filter((n) => !n.readAt).length ?? 0) +
-    (vibes.data?.filter(n => !n.readAt).length ?? 0);
+    (vibes.data?.filter(n => !n.readAt).length ?? 0) +
+    (airport.data?.filter(n => !n.readAt).length ?? 0);
   return (
     <View>
       <IconButton
@@ -185,6 +190,7 @@ function NotificationCard({
   );
 }
 export default function ActivityNotifications() {
+  const airport = useAirportNotices();
   const notifications = useActivityNotifications();
   const social = useSocialNotifications();
   const profileLikes = useProfileLikeNotifications();
@@ -268,7 +274,7 @@ export default function ActivityNotifications() {
   const waiting = plans.filter(
     (n) => n.role === "owner" && n.status === "pending",
   ).length;
-  const totalNew = newLikes + newPlans + socialUnread + vibeUnread;
+  const totalNew = newLikes + newPlans + socialUnread + vibeUnread + (airport.data?.filter(n => !n.readAt).length ?? 0);
 
   function renderEntry(entry: FeedItem) {
     if (entry.kind === "profile") {
@@ -396,6 +402,8 @@ export default function ActivityNotifications() {
         subtitle="See who likes you and your plans."
         back
       />
+      <AirportNotifications />
+      <AirportRequests />
       <LinearGradient colors={["#1A6065", "#08484F"]} style={s.hero}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
           <View style={s.heroIcon}>

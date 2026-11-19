@@ -38,6 +38,7 @@ import {
   User,
 } from "./models.js";
 import { VibeCheck } from "./vibe-check-models.js";
+import { airportRouter } from "./airports.js";
 import { deleteCloudinaryPhoto } from "./photos.js";
 import {
   activityInput,
@@ -107,6 +108,7 @@ export function createApp() {
   const authLimit = rateLimit({ windowMs: 15 * 60000, limit: 20 });
   app.use("/api/v1/admin", adminRouter());
   app.use("/api/v1/discovery", discoveryRouter());
+  app.use("/api/v1/airports", airportRouter());
   app.use("/api/v1/conversations", chatRouter());
   app.use("/api/v1/notifications", notificationsRouter());
   app.use("/api/v1/social", socialRouter());
@@ -249,6 +251,11 @@ export function createApp() {
       );
       await RefreshSession.deleteMany({ user: user._id });
       await PushDevice.deleteMany({ user: user._id });
+      const { endAirportSession } = await import("./airports.js");
+      const { AirportSession, AirportConnection } = await import("./airport-models.js");
+      await endAirportSession(String(user._id));
+      await AirportSession.deleteMany({ user: user._id });
+      await AirportConnection.updateMany({ users: user._id }, { $set: { state: "ended" } });
       const photos = await ProfilePhoto.find({ owner: user._id }).select(
         "+cloudinaryPublicId",
       );

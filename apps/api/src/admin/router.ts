@@ -42,6 +42,7 @@ import {
 import { strongPassword } from "./provision.js";
 import { socialAdminRouter } from "./social.js";
 import { playAdminRouter } from "./play.js";
+import { airportAdminRouter } from "./airports.js";
 import { config } from "../config.js";
 import {
   ensureEnvironmentAdmin,
@@ -306,6 +307,7 @@ export function adminRouter() {
   router.use(adminAuth);
   router.use("/social", socialAdminRouter());
   router.use("/games", playAdminRouter());
+  router.use("/airports", airportAdminRouter());
   router.get("/auth/me", (req: AdminRequest, res) =>
     res.json({
       data: {

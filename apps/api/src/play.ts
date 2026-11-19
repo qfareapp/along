@@ -57,11 +57,18 @@ export async function playConnections(userId: string) {
   );
   const eligible = new Set(ready.map(String));
   if (!eligible.has(userId)) return [];
+  const { AirportConnection } = await import("./airport-models.js");
+  const { airportConnectionAccess } = await import("./airports.js");
+  const airportPeers: string[] = [];
+  for (const grant of await AirportConnection.find({ users: userId, state: "connected" }).lean()) {
+    try { const access = await airportConnectionAccess(userId, grant._id, true); airportPeers.push(access.otherId); }
+    catch (error) { if (![403, 404].includes((error as { status?: number }).status ?? 0)) throw error; }
+  }
   return [
     ...new Set(
-      matches
+      [...airportPeers, ...matches
         .flatMap((m) => m.users.map(String))
-        .filter((id) => id !== userId && eligible.has(id) && !blocked.has(id)),
+        .filter((id) => id !== userId && eligible.has(id) && !blocked.has(id))],
     ),
   ];
 }
@@ -69,9 +76,15 @@ export async function authorizePlayPair(a: string, b: string) {
   if (a === b || !(await playConnections(a)).includes(b))
     throw fail(404, "This match is unavailable for play.");
   const match = await Match.findOne({ pairKey: pairKey(a, b), active: true });
-  const conversation = match
+  let conversation = match
     ? await Conversation.findOne({ match: match._id })
     : null;
+  if (!conversation) {
+    const { AirportConnection } = await import("./airport-models.js");
+    const { airportConnectionAccess } = await import("./airports.js");
+    const grant = await AirportConnection.findOne({ pairKey: pairKey(a, b), state: "connected" }).sort({ _id: -1 });
+    if (grant) { await airportConnectionAccess(a, grant._id, true); conversation = await Conversation.findById(grant.conversation); }
+  }
   if (!conversation)
     throw fail(404, "Open your matched conversation before playing.");
   return conversation;

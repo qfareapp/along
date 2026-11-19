@@ -318,6 +318,7 @@ export const Conversation = mongoose.model(
   new Schema(
     {
       match: { ...ref("Match"), unique: true },
+      airportConnection: { type: Schema.Types.ObjectId, ref: "AirportConnection" },
       firstSender: { type: Schema.Types.ObjectId, ref: "User" },
     },
     { timestamps: true },
