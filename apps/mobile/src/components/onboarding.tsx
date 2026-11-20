@@ -334,17 +334,11 @@ const PHOTO_TYPES = [
 export async function pickPhotos(
   limit = 1,
 ): Promise<{ uri: string; mime: string }[]> {
-  if (Platform.OS !== "web") {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted)
-      throw new Error(
-        "Photo permission is needed to choose a picture. You can allow it in device settings, or skip for now.",
-      );
-  }
   const multiple = limit > 1;
   const result = await ImagePicker.launchImageLibraryAsync({
     mediaTypes: ["images"],
-    allowsEditing: !multiple,
+    // Use the system picker with access only to the selected images.
+    allowsEditing: false,
     aspect: [1, 1],
     allowsMultipleSelection: multiple,
     selectionLimit: limit,

@@ -1,4 +1,5 @@
 import { Router } from "express";
+import crypto from "node:crypto";
 import mongoose from "mongoose";
 import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
@@ -24,16 +25,18 @@ async function summary(access: GroupAccess, userId: string) {
   const [lastMessage, unread] = await Promise.all([
     PlanGroupMessage.findOne({
       group: group._id,
+      sender: { $nin: access.hiddenSenders },
       sequence: { $gt: member.joinedAfter },
     }).sort({ sequence: -1 }),
     PlanGroupMessage.countDocuments({
       group: group._id,
       sequence: { $gt: Math.max(member.joinedAfter, member.lastReadSequence) },
-      sender: { $ne: userId },
+      sender: { $nin: [userId, ...access.hiddenSenders] },
     }),
   ]);
   return {
     id: String(group._id),
+    visibilityKey: crypto.createHash("sha256").update(JSON.stringify([access.hiddenSenders.slice().sort(), access.members.map(u => String(u._id)).sort(), member.joinedAfter, group.contentRevision ?? 0])).digest("hex"),
     activityId: String(activity._id),
     title: activity.title,
     messagingMode: group.messagingMode,
@@ -212,6 +215,7 @@ export function planGroupsRouter() {
     const access = await authorisePlanGroup(req.userId!, req.params.id);
     const rows = await PlanGroupMessage.find({
       group: access.group._id,
+      sender: { $nin: access.hiddenSenders },
       sequence: {
         $gt: access.member.joinedAfter,
         ...(input.before ? { $lt: input.before } : {}),
@@ -226,6 +230,7 @@ export function planGroupsRouter() {
         ...(await summary(access, req.userId!)),
         members: access.members.map((user) => ({
           id: String(user._id),
+          own: String(user._id) === req.userId,
           name: user.name,
           isOrganiser: String(user._id) === access.organiserId,
         })),

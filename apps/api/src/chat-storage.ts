@@ -87,14 +87,15 @@ export async function removeChatAttachment(asset: string) {
         if (error.code !== "ENOENT") throw error;
       },
     );
-  else if (asset.startsWith("cloudinary-raw:"))
-    await cloudinary.uploader
+  else if (asset.startsWith("cloudinary-raw:")) {
+    const result = await cloudinary.uploader
       .destroy(asset.slice(15), {
         ...credentials(),
         resource_type: "raw",
         type: "authenticated",
         invalidate: true,
-      })
-      .catch(() => undefined);
+      });
+    if (!["ok", "not found"].includes(result.result)) throw new Error("Media deletion was not acknowledged.");
+  }
   else await removeMomentPhoto(asset);
 }

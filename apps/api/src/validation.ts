@@ -44,6 +44,7 @@ export const credentials = z.object({
   password: z.string().min(10).max(72),
 });
 export const registration = credentials.extend({
+  acceptTerms: z.literal(true).optional(),
   name: z.string().trim().min(2).max(60),
   birthDate: z.iso
     .date()

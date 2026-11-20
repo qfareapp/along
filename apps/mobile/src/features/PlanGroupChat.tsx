@@ -151,6 +151,7 @@ export default function PlanGroupChat() {
   const [older, setOlder] = useState<{
     messages: GroupMessage[];
     nextBefore: number | null;
+    visibilityKey?: string;
   } | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<{
@@ -164,16 +165,17 @@ export default function PlanGroupChat() {
   const insets = useSafeAreaInsets(),
     keyboard = useKeyboardVisible();
   const data = query.data;
+  const visibleOlder = older?.visibilityKey === data?.visibilityKey ? older : null;
   const messages = useMemo(
     () =>
       [
         ...new Map(
-          [...(older?.messages ?? []), ...(data?.messages ?? [])].map(
+          [...(visibleOlder?.messages ?? []), ...(data?.messages ?? [])].map(
             (message) => [message.sequence, message],
           ),
         ).values(),
       ].sort((a, b) => a.sequence - b.sequence),
-    [older, data?.messages],
+    [visibleOlder, data?.messages],
   );
   useEffect(() => {
     if (!active || !data || data.lastSequence <= lastMarked.current) return;
@@ -269,7 +271,7 @@ export default function PlanGroupChat() {
     }
   }
   async function loadOlder() {
-    const before = older ? older.nextBefore : data?.nextBefore;
+    const before = visibleOlder ? visibleOlder.nextBefore : data?.nextBefore;
     if (!before || loadingOlder) return;
     setLoadingOlder(true);
     setError("");
@@ -279,8 +281,9 @@ export default function PlanGroupChat() {
         `/plan-groups/${id}?before=${before}`,
       );
       setOlder((current) => ({
-        messages: [...page.messages, ...(current?.messages ?? [])],
+        messages: [...page.messages, ...(current?.visibilityKey === page.visibilityKey ? current?.messages ?? [] : [])],
         nextBefore: page.nextBefore,
+        visibilityKey: page.visibilityKey,
       }));
     } catch (e) {
       setError(
@@ -375,6 +378,7 @@ export default function PlanGroupChat() {
                   }}
                 >
                   <Text style={[text.body, { flex: 1 }]}>{member.name}</Text>
+                  {!member.own && <Pressable accessibilityRole="button" accessibilityLabel={`Report or block ${member.name}`} onPress={() => router.push(`/safety?target=${member.id}&group=${data.id}`)} style={{ paddingVertical: 12 }}><Text style={{ color: c.teal }}>Safety</Text></Pressable>}
                   {member.isOrganiser && (
                     <Text style={{ color: c.teal, fontWeight: "700" }}>
                       Organiser · Admin
@@ -498,7 +502,7 @@ export default function PlanGroupChat() {
           }}
           contentContainerStyle={{ padding: 18, gap: 12, flexGrow: 1 }}
         >
-          {(older ? older.nextBefore : data.nextBefore) != null && (
+          {(visibleOlder ? visibleOlder.nextBefore : data.nextBefore) != null && (
             <Button
               variant="outline"
               loading={loadingOlder}
@@ -564,6 +568,7 @@ export default function PlanGroupChat() {
                 >
                   {formatChatTime(message.createdAt)}
                 </Text>
+                {!message.own && <Pressable accessibilityRole="button" accessibilityLabel={`Report message from ${message.sender.name}`} onPress={() => router.push(`/safety?target=${message.sender.id}&group=${data.id}&groupMessage=${message.id}`)} style={{ paddingVertical: 8 }}><Text style={[text.muted, { fontSize: 11 }]}>Report message</Text></Pressable>}
               </View>
             ),
           )}

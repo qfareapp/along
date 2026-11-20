@@ -1,13 +1,12 @@
 import React, { useState } from "react";
 import { Platform, Pressable, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { router, useLocalSearchParams } from "expo-router";
+import { router } from "expo-router";
 import {
   Button,
   card,
   DemoNotice,
   Empty,
-  Field,
   Header,
   Notice,
   Screen,
@@ -17,7 +16,7 @@ import { useAlong } from "../store/useAlong";
 import { api, clearSession, demoMode } from "../services/api";
 import { colors as c } from "../theme";
 import { useOnboarding } from "../store/useOnboarding";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import ActivityNotifications from "./ActivityNotifications";
 import { openPhoneNotificationSettings } from "../services/pushNotifications";
 
@@ -71,9 +70,9 @@ export function Settings() {
         <Ionicons name="chevron-forward" color={c.muted} size={17} />
       </Pressable>
       <Text style={[text.label, { marginTop: 28, marginBottom: 12 }]}>
-        Blocked preview profiles
+        Blocked members
       </Text>
-      {state.blocked.length ? (
+      {!demoMode ? <BlockedMembers /> : state.blocked.length ? (
         state.blocked.map((id) => (
           <View key={id} style={row}>
             <Text style={[text.body, { flex: 1, textTransform: "capitalize" }]}>
@@ -95,6 +94,12 @@ export function Settings() {
         Along shows approximate areas. Exact addresses and daily routes should
         stay private.
       </Notice>
+      <View style={{ gap: 10, marginTop: 20 }}>
+        <Button variant="outline" onPress={() => router.push("/policies?section=privacy")}>Privacy Policy</Button>
+        <Button variant="outline" onPress={() => router.push("/policies?section=terms")}>Terms & Community Guidelines</Button>
+        <Button variant="outline" onPress={() => router.push("/policies?section=child-safety")}>Child Safety Standards</Button>
+        <Button variant="outline" onPress={() => router.push("/safety?category=support")}>Contact support</Button>
+      </View>
       <View style={{ marginTop: 25, gap: 12 }}>
         <Button
           variant="outline"
@@ -129,7 +134,7 @@ export function Settings() {
       {!demoMode && (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Delete profile"
+          accessibilityLabel="Delete account"
           onPress={() => router.push("/delete-account")}
           style={({ pressed }) => [
             card,
@@ -157,7 +162,7 @@ export function Settings() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[text.label, { color: "#BA4034" }]}>
-              Delete profile
+              Delete account
             </Text>
             <Text style={[text.muted, { fontSize: 12, lineHeight: 17 }]}>
               Permanently remove your profile and photos
@@ -170,159 +175,25 @@ export function Settings() {
     </Screen>
   );
 }
-export function Safety() {
-  const { target, activity } = useLocalSearchParams<{
-    target?: string;
-    activity?: string;
-  }>();
-  const state = useAlong();
-  const [reason, setReason] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+function BlockedMembers() {
+  const client = useQueryClient();
+  const query = useQuery({ queryKey: ["blocked-members"], queryFn: () => api<{ id: string; name: string }[]>("/blocks") });
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  async function report() {
-    if (reason.trim().length < 10) {
-      setError(
-        "Please add at least 10 characters so we understand what happened.",
-      );
-      return;
-    }
-    if (!target) {
-      setError("Open a profile and choose Report to report a specific member.");
-      return;
-    }
+  async function unblock(id: string) {
+    setBusy(id); setError("");
     try {
-      if (!demoMode)
-        await api("/reports", {
-          method: "POST",
-          body: JSON.stringify({
-            userId: target,
-            reason,
-            activityId: activity,
-          }),
-        });
-      setSubmitted(true);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not submit.");
-    }
+      await api(`/blocks/${id}`, { method: "DELETE" });
+      await client.invalidateQueries();
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not unblock."); }
+    finally { setBusy(""); }
   }
-  return (
-    <Screen>
-      <Header
-        title="Safety Centre"
-        subtitle="Your comfort comes first. Always."
-        back
-      />
-      <View
-        style={{
-          alignItems: "center",
-          backgroundColor: "#E9EFE7",
-          borderRadius: 24,
-          padding: 30,
-          marginVertical: 14,
-        }}
-      >
-        <Ionicons name="shield-checkmark-outline" size={52} color={c.teal} />
-        <Text
-          style={[text.title, { color: c.teal, fontSize: 22, marginTop: 13 }]}
-        >
-          Good plans. Safe beginnings.
-        </Text>
-      </View>
-      {[
-        {
-          title: "Meet somewhere public",
-          description:
-            "Choose a busy café or familiar public place. Arrange your own transport and tell someone you trust about your plan.",
-        },
-        {
-          title: "Shared plans don’t imply consent",
-          description:
-            "A ride, a ticket or a shared bill never creates an obligation. Romantic interest must always be mutual and freely agreed.",
-        },
-        {
-          title: "Protect your personal information",
-          description:
-            "Keep exact addresses, financial details and daily routines private. Never send money to someone you haven’t met.",
-        },
-        {
-          title: "Trust your comfort level",
-          description:
-            "You can leave, decline, unmatch or block at any time. You never need to justify a boundary.",
-        },
-      ].map((tip, i) => (
-        <View
-          key={tip.title}
-          style={{ flexDirection: "row", gap: 13, marginTop: 18 }}
-        >
-          <Text
-            style={{ color: c.coralBright, fontWeight: "700", fontSize: 18 }}
-          >
-            0{i + 1}
-          </Text>
-          <View style={{ flex: 1 }}>
-            <Text style={text.label}>{tip.title}</Text>
-            <Text style={[text.muted, { marginTop: 7 }]}>
-              {tip.description}
-            </Text>
-          </View>
-        </View>
-      ))}
-      {target && (
-        <View style={{ marginTop: 26 }}>
-          <Text style={[text.title, { fontSize: 21, marginBottom: 13 }]}>
-            Report a concern
-          </Text>
-          {submitted ? (
-            <Notice>
-              {demoMode
-                ? "Preview only: your report was not sent to a moderator."
-                : "Your report was received for review."}
-            </Notice>
-          ) : (
-            <>
-              <Field
-                label="What happened?"
-                placeholder="Share details about the concern."
-                value={reason}
-                onChangeText={setReason}
-                maxLength={1500}
-                multiline
-              />
-              {error && (
-                <Text style={{ color: "#BA4034", marginBottom: 12 }}>
-                  {error}
-                </Text>
-              )}
-              <Button
-                onPress={() => {
-                  void report();
-                }}
-              >
-                {demoMode ? "Preview Report" : "Submit Report"}
-              </Button>
-            </>
-          )}
-          <View style={{ marginTop: 12 }}>
-            <Button
-              variant="outline"
-              onPress={() => {
-                state.update({
-                  blocked: [...new Set([...state.blocked, target])],
-                  matched: target === "ananya" ? false : state.matched,
-                });
-                router.replace("/(tabs)");
-              }}
-            >
-              Block Preview Profile
-            </Button>
-          </View>
-        </View>
-      )}
-      <DemoNotice />
-    </Screen>
-  );
+  return <View style={{ gap: 10 }}>
+    {query.isPending ? <Text style={text.muted}>Loading blocked members…</Text> : query.isError ? <><Notice>Could not load blocked members.</Notice><Button variant="outline" onPress={() => void query.refetch()}>Try again</Button></> : !query.data?.length ? <Text style={text.muted}>You haven&apos;t blocked anyone.</Text> : query.data.map(member => <View key={member.id} style={row}><Text style={[text.body, { flex: 1 }]}>{member.name}</Text><Button variant="outline" loading={busy === member.id} disabled={!!busy} onPress={() => void unblock(member.id)}>Unblock</Button></View>)}
+    {!!error && <Notice>{error}</Notice>}
+  </View>;
 }
+export { default as Safety } from "./Safety";
 export function Notifications() {
   const state = useAlong();
   if (!demoMode) return <ActivityNotifications />;

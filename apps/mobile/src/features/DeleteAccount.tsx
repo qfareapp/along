@@ -44,7 +44,7 @@ export default function DeleteAccount() {
   }
   return (
     <Screen width="reading">
-      <Header title="Delete profile" back />
+      <Header title="Delete account" back />
       {demoMode ? (
         <Notice>Sign in to manage your account.</Notice>
       ) : (
@@ -57,7 +57,7 @@ export default function DeleteAccount() {
               We&apos;re sorry to see you go
             </Text>
             <Text style={[text.muted, { textAlign: "center" }]}>
-              Deleting your profile is permanent and can&apos;t be undone.
+              Deleting your account is permanent and can&apos;t be undone.
             </Text>
           </View>
           <View style={s.card}>
@@ -69,11 +69,13 @@ export default function DeleteAccount() {
               </View>
             ))}
             <Text style={[text.muted, { fontSize: 12, lineHeight: 18 }]}>
-              Safety reports and a minimal account record are kept so we can
-              keep the community safe. Your email can&apos;t be reused for a
-              new account.
+              Your messages, uploads, Moments, game records and account details
+              are removed. Storage-provider removal is queued and retried if
+              temporarily unavailable. Limited safety reports may be kept for
+              up to 180 days. You can register again with the same email.
             </Text>
           </View>
+          <Button variant="outline" onPress={() => router.push("/policies?section=delete-account")}>Read deletion and retention details</Button>
           <Pressable
             accessibilityRole="checkbox"
             accessibilityState={{ checked: understood, disabled: busy }}

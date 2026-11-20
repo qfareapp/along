@@ -15,7 +15,10 @@ import {
   Match,
   Conversation,
   RefreshSession,
+  Message,
 } from "../models.js";
+import { PlanGroup, PlanGroupMessage } from "../plan-group-models.js";
+import { queueAsset } from "../account-deletion.js";
 import { digest } from "../auth.js";
 import {
   AdminRole,
@@ -949,8 +952,9 @@ export function adminRouter() {
     const { page, limit } = pagination.parse(req.query);
     const [items, total] = await Promise.all([
       Report.find()
+        .select("+evidenceText")
         .populate("reporter target", "name status")
-        .sort({ _id: -1 })
+        .sort({ priority: -1, _id: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
@@ -972,6 +976,7 @@ export function adminRouter() {
             "dismissed",
           ]),
           severity: z.enum(["low", "medium", "high", "critical"]),
+          removeContent: z.boolean().default(false),
           reason: reasonInput,
         })
         .parse(req.body);
@@ -988,6 +993,7 @@ export function adminRouter() {
             {
               status: body.status,
               severity: body.severity,
+              priority: body.severity === "critical" ? 100 : body.severity === "high" ? 50 : 0,
               $push: {
                 notes: { text: body.reason, by: req.admin!.id, at: new Date() },
               },
@@ -996,6 +1002,18 @@ export function adminRouter() {
             { new: true, session },
           );
           if (!report) throw fail(404, "Report not found.");
+          if (body.removeContent) {
+            if (!report.message && !report.groupMessage) throw fail(400, "This report has no removable message. Use profile or Social moderation controls.");
+            if (report.message) {
+              const message = await Message.findById(report.message).select("+attachment.asset").session(session);
+              if (message?.attachment?.asset) await queueAsset(message.attachment.asset, session);
+              await Message.deleteOne({ _id: report.message }, { session });
+            }
+            if (report.groupMessage) {
+              await PlanGroupMessage.deleteOne({ _id: report.groupMessage }, { session });
+              if (report.group) await PlanGroup.updateOne({ _id: report.group }, { $inc: { contentRevision: 1 } }, { session });
+            }
+          }
           return report;
         },
       );

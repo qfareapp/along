@@ -24,9 +24,10 @@ export type PlanGroupSummary = {
   lastReadSequence: number;
   updatedAt: string;
   lastMessage: GroupMessage | null;
+  visibilityKey?: string;
 };
 export type PlanGroupThread = PlanGroupSummary & {
-  members: { id: string; name: string; isOrganiser: boolean }[];
+  members: { id: string; name: string; isOrganiser: boolean; own?: boolean }[];
   messages: GroupMessage[];
   nextBefore: number | null;
 };

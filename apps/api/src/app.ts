@@ -39,7 +39,10 @@ import {
 } from "./models.js";
 import { VibeCheck } from "./vibe-check-models.js";
 import { airportRouter } from "./airports.js";
-import { deleteCloudinaryPhoto } from "./photos.js";
+import { eraseAccount } from "./account-deletion.js";
+import { safetyRouter } from "./safety.js";
+import { publicPoliciesRouter } from "./public-policies.js";
+import { policyVersion } from "../../../packages/policies/index.js";
 import {
   activityInput,
   checkPlanDetails,
@@ -83,6 +86,7 @@ export function createApp() {
   );
   app.use(express.json({ limit: "32kb" }));
   app.use(...appRateLimits());
+  app.use(publicPoliciesRouter());
   app.get("/health", (_req, res) =>
     res.json({ status: "ok", service: "along-api" }),
   );
@@ -107,6 +111,7 @@ export function createApp() {
   });
   const authLimit = rateLimit({ windowMs: 15 * 60000, limit: 20 });
   app.use("/api/v1/admin", adminRouter());
+  app.use("/api/v1", safetyRouter());
   app.use("/api/v1/discovery", discoveryRouter());
   app.use("/api/v1/airports", airportRouter());
   app.use("/api/v1/conversations", chatRouter());
@@ -137,7 +142,7 @@ export function createApp() {
       name: body.name,
       birthDate: body.birthDate,
     });
-    await Profile.create({ user: user._id });
+    await Profile.create({ user: user._id, ...(body.acceptTerms ? { consents: { termsAt: new Date(), guidelinesAt: new Date(), version: policyVersion } } : {}) });
     res.status(201).json({
       data: {
         ...(await tokens(String(user._id))),
@@ -221,9 +226,7 @@ export function createApp() {
       },
     });
   });
-  // Self-service deletion: the account becomes "deleted" (the same terminal
-  // state admins use), personal profile content is erased, and the record plus
-  // any reports stay for moderation. The email remains reserved.
+  // Password-confirmed permanent deletion with transactional data cleanup.
   app.delete(
     "/api/v1/users/me",
     authLimit,
@@ -241,57 +244,7 @@ export function createApp() {
       // 400, not 401: a wrong password must not look like an expired session.
       if (!(await bcrypt.compare(password, user.passwordHash)))
         throw fail(400, "Password is incorrect.");
-      await User.updateOne(
-        { _id: user._id },
-        {
-          $set: { status: "deleted", name: "Deleted member" },
-          $inc: { sessionVersion: 1 },
-          $unset: { lastActiveAt: 1 },
-        },
-      );
-      await RefreshSession.deleteMany({ user: user._id });
-      await PushDevice.deleteMany({ user: user._id });
-      const { endAirportSession } = await import("./airports.js");
-      const { AirportSession, AirportConnection } = await import("./airport-models.js");
-      await endAirportSession(String(user._id));
-      await AirportSession.deleteMany({ user: user._id });
-      await AirportConnection.updateMany({ users: user._id }, { $set: { state: "ended" } });
-      const photos = await ProfilePhoto.find({ owner: user._id }).select(
-        "+cloudinaryPublicId",
-      );
-      for (const photo of photos)
-        if (photo.cloudinaryPublicId)
-          await deleteCloudinaryPhoto(photo.cloudinaryPublicId).catch(
-            () => undefined,
-          );
-      await Promise.all([
-        ProfilePhoto.deleteMany({ owner: user._id }),
-        Profile.updateOne(
-          { user: user._id },
-          {
-            $set: { photos: [], interests: [] },
-            $unset: {
-              bio: 1,
-              occupation: 1,
-              city: 1,
-              area: 1,
-              gender: 1,
-              approximateLocation: 1,
-              optionalDetails: 1,
-              preferences: 1,
-              "onboarding.personalityPrompt": 1,
-            },
-          },
-        ),
-        Activity.updateMany(
-          { creator: user._id, status: { $ne: "deleted" } },
-          { $set: { status: "deleted" } },
-        ),
-        VibeCheck.updateOne(
-          { owner: user._id },
-          { $set: { enabled: false, autoMatch: false, questions: [] } },
-        ),
-      ]);
+      await eraseAccount(String(user._id));
       res.status(204).end();
     },
   );
@@ -498,38 +451,6 @@ export function createApp() {
       res.status(204).end();
     },
   );
-  app.post("/api/v1/blocks", authenticate, async (req: AuthedRequest, res) => {
-    const { userId } = z.object({ userId: z.string() }).parse(req.body);
-    validId(userId);
-    if (userId === req.userId)
-      throw fail(400, "Cannot block your own account.");
-    await Block.updateOne(
-      { user: req.userId, target: userId },
-      { $setOnInsert: { user: req.userId, target: userId } },
-      { upsert: true },
-    );
-    await Match.updateOne(
-      { pairKey: pairKey(req.userId!, userId) },
-      { $set: { active: false } },
-    );
-    res.status(204).end();
-  });
-  app.post("/api/v1/reports", authenticate, async (req: AuthedRequest, res) => {
-    const body = z
-      .object({
-        userId: z.string(),
-        reason: z.string().trim().min(10).max(1500),
-        activityId: z.string().optional(),
-      })
-      .parse(req.body);
-    await Report.create({
-      reporter: req.userId,
-      target: validId(body.userId),
-      reason: body.reason,
-      ...(body.activityId ? { activity: validId(body.activityId) } : {}),
-    });
-    res.status(201).json({ data: { received: true } });
-  });
   app.use((_req, res) =>
     res
       .status(404)

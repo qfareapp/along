@@ -1,14 +1,29 @@
-import React from "react";
-import { Text } from "react-native";
+import React, { useState } from "react";
+import { Linking, Pressable, Text, View } from "react-native";
+import { router, useLocalSearchParams } from "expo-router";
+import { policies, policyVersion, supportEmail } from "../../../../packages/policies/index.js";
 import { Header, Screen, text } from "../components/ui";
+import { apiBaseUrl } from "../services/api";
+import { colors as c } from "../theme";
 export default function Policies() {
+  const { section } = useLocalSearchParams<{ section?: string }>();
+  const key = section && Object.hasOwn(policies, section) ? section as keyof typeof policies : "terms";
+  const policy = policies[key];
+  const [error, setError] = useState("");
+  async function open(url: string) {
+    try { await Linking.openURL(url); } catch { setError(`Could not open the link. Contact ${supportEmail} for help.`); }
+  }
   return (
-    <Screen>
-      <Header title="Terms & Community Guidelines" back />
-      <Text style={[text.title, { marginVertical: 24 }]}>Be good company.</Text>
-      <Text
-        style={text.body}
-      >{`Version: 26 October 2026\n\nAlong is for adults aged 18 and over. Provide accurate information, use photographs you have permission to share, and keep your account secure. Do not impersonate someone or use Along for fraud, solicitation or illegal activity.\n\nA shared plan never implies romantic or physical consent. Ask clearly, respect a no, and stop contact when asked. Harassment, hate, threats, sexual exploitation and sharing someone else's private information are prohibited.\n\nMeet in public, tell someone you trust about your plans and avoid posting exact home or office addresses. You control whether to publish an activity. Report or block accounts that make you uncomfortable.\n\nAlong may review reported content and restrict or suspend accounts to enforce these guidelines. No match or meeting is guaranteed. You can update your preferences, remove your photos or contact support through the app's safety settings.\n\nThese rules apply to every plan, profile and conversation. Your full birth date and verification codes are private; your public profile becomes visible only after eligibility checks and your activation.`}</Text>
+    <Screen width="reading">
+      <Header title={policy.title} back />
+      <Text style={[text.muted, { marginVertical: 15 }]}>Along · Updated {policyVersion}</Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 20 }}>
+        {(Object.keys(policies) as (keyof typeof policies)[]).map(item => <Pressable key={item} accessibilityRole="link" onPress={() => router.setParams({ section: item })} style={{ padding: 10, borderRadius: 10, backgroundColor: key === item ? "#DDECE8" : "#F5E9DF" }}><Text style={[text.label, { color: c.teal, fontSize: 12 }]}>{policies[item].title}</Text></Pressable>)}
+      </View>
+      {policy.sections.map(s => <View key={s.title} style={{ gap: 8, marginBottom: 22 }}><Text style={[text.title, { fontSize: 19 }]}>{s.title}</Text><Text style={text.body}>{s.body}</Text></View>)}
+      <Pressable accessibilityRole="link" onPress={() => void open(`mailto:${supportEmail}`)} style={{ paddingVertical: 16 }}><Text style={{ color: c.teal }}>{supportEmail}</Text></Pressable>
+      {!!apiBaseUrl && <Pressable accessibilityRole="link" onPress={() => void open(`${new URL(apiBaseUrl).origin}/${key}`)} style={{ paddingVertical: 16 }}><Text style={{ color: c.teal }}>Open public {policy.title.toLowerCase()} page</Text></Pressable>}
+      {!!error && <Text accessibilityRole="alert" style={text.body}>{error}</Text>}
     </Screen>
   );
 }

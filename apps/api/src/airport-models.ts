@@ -36,7 +36,7 @@ const airportSchema = new Schema<AirportRecord>(
     enabled: { type: Boolean, default: false },
     timezone: { type: String, default: "Asia/Kolkata" },
     // Reference-point proximity is approximate; it is never proof of terminal access.
-    radiusM: { type: Number, default: 500 },
+    radiusM: { type: Number, default: 1000 },
     boundary: { type: [[Number]], default: undefined },
     zones: [{ _id: false, id: String, name: String, compatibleWith: [String] }],
     configurationSource: String,

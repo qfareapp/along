@@ -27,7 +27,7 @@ export async function seedBelghariaDemoAirport() {
       $set: belghariaDemoAirport,
       $setOnInsert: {
         enabled: true,
-        radiusM: 500,
+        radiusM: 1000,
         timezone: "Asia/Kolkata",
         configurationSource:
           "Owner-provided Belgharia coordinates; synthetic test area, not a real airport or terminal.",
@@ -46,7 +46,7 @@ export async function seedBelghariaDemoAirport() {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (!process.argv.includes("--apply")) {
-    console.log({ ...belghariaDemoAirport, radiusM: 500, dryRun: true });
+    console.log({ ...belghariaDemoAirport, radiusM: 1000, dryRun: true });
   } else {
     if (!config.MONGODB_URI)
       throw new Error("MONGODB_URI is required for --apply.");

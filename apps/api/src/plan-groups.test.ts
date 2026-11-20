@@ -19,13 +19,14 @@ const {
   Conversation,
   Profile,
   User,
+  Report,
 } = await import("./models.js");
 const { PlanGroup, PlanGroupMember, PlanGroupMessage } =
   await import("./plan-group-models.js");
 const { acceptActivityInterest } = await import("./activities.js");
 const { eligibleProfile } = await import("./test-fixtures.js");
 const { tokens } = await import("./auth.js");
-const app = createApp();
+let app = createApp();
 let db: MongoMemoryReplSet,
   plan: string,
   sequence = 0;
@@ -105,6 +106,8 @@ before(
   { timeout: 180000 },
 );
 beforeEach(async () => {
+  // Isolate per-app rate-limit stores between independent cases.
+  app = createApp();
   sequence++;
   await Promise.all([
     PlanGroup.deleteMany({}),
@@ -115,6 +118,7 @@ beforeEach(async () => {
     Block.deleteMany({}),
     Match.deleteMany({}),
     Conversation.deleteMany({}),
+    Report.deleteMany({}),
   ]);
   await User.updateMany(
     {},
@@ -511,4 +515,34 @@ test("members cannot add outsiders, spoof senders, elevate themselves, or submit
     400,
   );
   assert.equal((await get("/invalid")).status, 404);
+});
+
+test("participant blocks hide messages, previews, unread counts and roster entries in both directions", async () => {
+  await selected();
+  const id = await group();
+  await send(id, 1, crypto.randomUUID(), "Hidden message from blocked participant");
+  const previousKey = (await get(`/${id}`, 2)).body.data.visibilityKey;
+  await Block.create({ user: ids[2], target: ids[1] });
+  const thread = (await get(`/${id}`, 2)).body.data;
+  assert.notEqual(thread.visibilityKey, previousKey);
+  assert.ok(!thread.members.some((m: { id: string }) => m.id === ids[1]));
+  assert.ok(!thread.messages.some((m: { sender: { id: string } }) => m.sender.id === ids[1]));
+  assert.equal(thread.unread, 1); // Only the organiser's group-created announcement.
+  assert.notEqual(thread.lastMessage.sender.id, ids[1]);
+  await send(id, 2, crypto.randomUUID(), "A reply hidden from the blocked participant");
+  assert.ok(!(await get(`/${id}`, 1)).body.data.messages.some((m: { sender: { id: string } }) => m.sender.id === ids[2]));
+});
+
+test("group message reports require membership and the reporter's permitted history", async () => {
+  await selected();
+  const id = await group();
+  const msg = (await send(id, 1, crypto.randomUUID(), "Selected message for moderation")).body.data;
+  const report = (who: number, body = {}) => request(app).post("/api/v1/reports").auth(access[who], { type: "bearer" }).send({ groupId: id, groupMessageId: msg.id, userId: ids[1], category: "harassment", reason: "Please review this selected group message", ...body });
+  const valid = await report(2);
+  assert.equal(valid.status, 201);
+  assert.equal((await Report.findById(valid.body.data.reference).select("+evidenceText"))!.evidenceText, "Selected message for moderation");
+  assert.equal((await report(21)).status, 404);
+  assert.equal((await report(2, { userId: ids[0] })).status, 404);
+  await PlanGroupMember.updateOne({ group: id, user: ids[2] }, { joinedAfter: msg.sequence });
+  assert.equal((await report(2)).status, 404);
 });

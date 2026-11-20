@@ -1,0 +1,55 @@
+import { before, beforeEach, after, test } from "node:test";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import mongoose from "mongoose";
+import request from "supertest";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
+process.env.NODE_ENV = "test";
+process.env.ADMIN_AUTH_MODE = "mfa";
+process.env.ADMIN_ORIGIN = "http://localhost:3000";
+process.env.JWT_SECRET = crypto.randomBytes(48).toString("hex");
+const { createApp } = await import("./app.js");
+const { User, Report, Message, Match, Conversation } = await import("./models.js");
+const { AdminRole, AdminSession, AuditLog } = await import("./admin/models.js");
+const { MediaDeletion } = await import("./account-deletion.js");
+const { digest } = await import("./auth.js");
+let db: MongoMemoryReplSet, app = createApp(), reportId = "", messageId = "";
+let headers: Record<string, string> = {};
+before(async () => {
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  await mongoose.connect(db.getUri());
+  await Promise.all([MediaDeletion.init(), AdminSession.init(), AdminRole.init()]);
+}, { timeout: 180000 });
+beforeEach(async () => {
+  app = createApp();
+  for (const model of Object.values(mongoose.models)) await model.deleteMany({});
+  const role = await AdminRole.create({ slug: "safety-reviewer", name: "Safety reviewer", permissions: ["reports.review"] });
+  const operator = await User.create({ name: "Reviewer", email: "reviewer@example.test", passwordHash: "fixture", adminRole: role.slug });
+  const token = crypto.randomBytes(48).toString("base64url"), csrf = crypto.randomBytes(24).toString("hex");
+  await AdminSession.create({ user: operator._id, tokenHash: digest(token), csrf, expiresAt: new Date(Date.now() + 600000), lastSeenAt: new Date() });
+  headers = { Cookie: `along_admin=${token}`, Origin: "http://localhost:3000", "X-CSRF-Token": csrf };
+  const sender = new mongoose.Types.ObjectId(), reporter = new mongoose.Types.ObjectId();
+  const match = await Match.create({ users: [sender, reporter], pairKey: `${sender}:${reporter}` });
+  const conversation = await Conversation.create({ match: match._id });
+  const message = await Message.create({ conversation: conversation._id, sender, text: "Selected text evidence", attachment: { kind: "file", asset: "cloudinary-raw:along/reported-file", mimeType: "application/pdf" } });
+  messageId = String(message._id);
+  const report = await Report.create({ reporter, target: sender, reason: "Investigate the selected message", message: message._id, conversation: conversation._id, evidenceText: message.text, category: "harassment" });
+  reportId = String(report._id);
+});
+after(async () => { await mongoose.disconnect(); if (db) await db.stop(); });
+test("authorised moderation removes the message, durably queues media and records the decision", async () => {
+  await request(app).post(`/api/v1/admin/reports/${reportId}/review`).set({ ...headers, "X-CSRF-Token": "wrong" }).send({ status: "action_taken", severity: "high", removeContent: true, reason: "Remove this reported message after review" }).expect(403);
+  assert.ok(await Message.exists({ _id: messageId }));
+  await request(app).post(`/api/v1/admin/reports/${reportId}/review`).set(headers).send({ status: "action_taken", severity: "high", removeContent: true, reason: "Remove this reported message after review" }).expect(200);
+  assert.equal(await Message.countDocuments({ _id: messageId }), 0);
+  assert.equal((await MediaDeletion.findOne().select("+asset"))!.asset, "cloudinary-raw:along/reported-file");
+  assert.equal(await AuditLog.countDocuments({ targetId: reportId, action: "report.action_taken" }), 1);
+  assert.equal((await Report.findById(reportId).select("+evidenceText"))!.evidenceText, "Selected text evidence");
+});
+test("report queue prioritises child-safety concerns and keeps evidence behind admin authentication", async () => {
+  const critical = await Report.create({ reporter: new mongoose.Types.ObjectId(), category: "child_safety", priority: 100, severity: "critical", reason: "Review this urgent safety concern" });
+  await request(app).get("/api/v1/admin/reports").expect(401);
+  const response = await request(app).get("/api/v1/admin/reports").set(headers).expect(200);
+  assert.equal(response.body.data.items[0]._id, String(critical._id));
+  assert.equal(response.body.data.items.find((r: { _id: string }) => r._id === reportId).evidenceText, "Selected text evidence");
+});

@@ -453,7 +453,7 @@ export function LiveConversation({ id }: { id?: string }) {
             <MenuRow
               icon="shield-checkmark-outline"
               label="Safety & reporting"
-              onPress={() => router.push(`/safety?target=${member.id}`)}
+              onPress={() => router.push(`/safety?target=${member.id}&conversation=${data.id}`)}
             />
             {confirmUnmatch ? (
               <View style={{ padding: 14, gap: 10 }}>
@@ -690,6 +690,7 @@ export function LiveConversation({ id }: { id?: string }) {
                       {formatChatTime(msg.createdAt)}
                       {msg.id === lastOwn?.id && msg.readAt ? " · Seen" : ""}
                     </Text>
+                    {!msg.own && <Pressable accessibilityRole="button" accessibilityLabel="Report this message" onPress={() => router.push(`/safety?target=${member.id}&conversation=${data.id}&message=${msg.id}`)} style={{ paddingVertical: 8 }}><Text style={[text.muted, { fontSize: 11 }]}>Report message</Text></Pressable>}
                   </View>
                 </View>
               ))}

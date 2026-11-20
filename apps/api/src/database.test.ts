@@ -2,18 +2,18 @@ import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import mongoose from "mongoose";
 import request from "supertest";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 import { eligibleProfile } from "./test-fixtures.js";
 import { initializeCategories, seedCategories } from "./categories.js";
 
 process.env.JWT_SECRET = "test-only-not-a-deployment-secret-0000000000";
 const { createApp } = await import("./app.js");
 const { User, Category, ActivityInterest } = await import("./models.js");
-let database: MongoMemoryServer;
+let database: MongoMemoryReplSet;
 const app = createApp();
 before(
   async () => {
-    database = await MongoMemoryServer.create();
+    database = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     await mongoose.connect(database.getUri());
     await Promise.all([User.init(), Category.init(), ActivityInterest.init()]);
   },

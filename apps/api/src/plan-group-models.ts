@@ -15,6 +15,7 @@ export const PlanGroup = mongoose.model(
         default: "everyone",
       },
       lastSequence: { type: Number, default: 0 },
+      contentRevision: { type: Number, default: 0 },
     },
     { timestamps: true },
   ),

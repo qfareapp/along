@@ -57,7 +57,7 @@ const definitions: Record<
     description:
       "Investigate concerns, capture a reason and keep a clear resolution history.",
     endpoint: "reports",
-    columns: ["reporter", "target", "reason", "severity", "status"],
+    columns: ["reporter", "target", "category", "reason", "severity", "status"],
     actions: [
       { label: "Begin review", value: "under_review" },
       { label: "Escalate concern", value: "escalated" },
@@ -89,6 +89,7 @@ export function Resource({ module }: { module: string }) {
   const [action, setAction] = useState("");
   const [reason, setReason] = useState("");
   const [severity, setSeverity] = useState("medium");
+  const [removeContent, setRemoveContent] = useState(false);
   const client = useQueryClient();
   const query = useQuery({
     queryKey: ["resource", module, page, search],
@@ -108,7 +109,7 @@ export function Resource({ module }: { module: string }) {
           body: json({
             status: action,
             reason,
-            ...(module === "reports" ? { severity } : {}),
+            ...(module === "reports" ? { severity, removeContent } : {}),
           }),
         },
       ),
@@ -152,6 +153,7 @@ export function Resource({ module }: { module: string }) {
               setSelected(row.original);
               setAction("");
               setReason("");
+              setRemoveContent(false);
               setSeverity(
                 display(row.original.severity) === "—"
                   ? "medium"
@@ -263,6 +265,7 @@ export function Resource({ module }: { module: string }) {
                     </select>
                   </label>
                 )}
+                {module === "reports" && !!(selected.message || selected.groupMessage) && <label className="flex items-center gap-3 text-xs"><input type="checkbox" checked={removeContent} onChange={e => setRemoveContent(e.target.checked)} />Remove the reported message and queue its attachment for deletion</label>}
                 <label className="block text-xs font-semibold">
                   Reason
                   <textarea

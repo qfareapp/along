@@ -62,6 +62,8 @@ export async function authorisePlanGroup(
   )
     throw fail(404, "Group chat unavailable.");
   const organiserId = String(activity.creator);
+  const viewerBlocks = await Block.find({ $or: [{ user: userId }, { target: userId }] }).session(session ?? null).lean();
+  const hiddenSenders = viewerBlocks.map(b => String(String(b.user) === userId ? b.target : b.user));
   const blocked = await Block.exists({
     $or: [
       { user: userId, target: organiserId },
@@ -95,7 +97,8 @@ export async function authorisePlanGroup(
     group,
     activity,
     member,
-    members: roster,
+    members: roster.filter(u => !hiddenSenders.includes(String(u._id))),
+    hiddenSenders,
     organiserId,
     isOrganiser,
     canSend:

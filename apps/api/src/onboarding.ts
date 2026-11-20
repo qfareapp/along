@@ -533,7 +533,7 @@ export function onboardingRouter() {
           ...distance,
           "consents.termsAt": new Date(),
           "consents.guidelinesAt": new Date(),
-          "consents.version": "2026-10-26",
+          "consents.version": "2026-11-19",
         },
       },
       { runValidators: true },

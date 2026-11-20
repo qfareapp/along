@@ -87,6 +87,17 @@ const configuration = z
           "Boundary must be a closed, non-intersecting GeoJSON ring with non-zero area in longitude/latitude order.",
       });
   });
+const controls = z.object({
+  enabled: z.boolean().optional(),
+  radiusM: z.number().int().min(100).max(15000).optional(),
+}).strict().refine(v => v.enabled !== undefined || v.radiusM !== undefined, "Choose an airport setting to change.");
+
+async function closeAirportVisits(airport: mongoose.Types.ObjectId, session: mongoose.ClientSession) {
+  const now = new Date();
+  await AirportSession.updateMany({ airport, status: "active" }, { $set: { status: "ended", endedAt: now } }, { session });
+  await AirportConnection.updateMany({ airport, state: "pending" }, { $set: { state: "ended" } }, { session });
+  await AirportConnection.updateMany({ airport, state: "connected", validUntil: { $gt: now } }, { $set: { validUntil: now, decisionUntil: new Date(+now + 86400000) } }, { session });
+}
 export function airportAdminRouter() {
   const router = Router();
   router.use(permit("settings.manage"));
@@ -94,6 +105,32 @@ export function airportAdminRouter() {
     res.json({
       data: await Airport.find().sort({ name: 1 }).limit(500).lean(),
     });
+  });
+  router.patch("/:id/controls", async (req: AdminRequest, res) => {
+    const airportId = z.string().regex(/^[a-f\d]{24}$/i).parse(req.params.id);
+    const input = controls.parse(req.body);
+    const result = await mongoose.connection.transaction(async session => {
+      const airport = await Airport.findById(airportId).session(session);
+      if (!airport) throw Object.assign(new Error("Airport not found."), { status: 404 });
+      const previous = { enabled: airport.enabled, radiusM: airport.radiusM };
+      if (input.radiusM !== undefined) airport.radiusM = input.radiusM;
+      if (input.enabled !== undefined) airport.enabled = input.enabled;
+      if (input.enabled === true && !airport.zones.length) {
+        // A broad proximity label permits activation without inventing terminals or meetable areas.
+        airport.zones.push({ id: "near-airport", name: "Near airport (approximate)", compatibleWith: [] });
+        if (!airport.configurationSource) airport.configurationSource = "Approximate reference-point radius; airport terminals, access and meeting zones are not verified.";
+      }
+      await airport.save({ session });
+      if (input.enabled === false) await closeAirportVisits(airport._id, session);
+      await AuditLog.create([{
+        admin: req.admin!.id, action: "airport.controls", targetType: "airport", targetId: airportId,
+        reason: input.enabled === undefined ? `Set detection radius to ${airport.radiusM} metres.` : `${airport.enabled ? "Enable" : "Disable"} airport through row controls.`,
+        metadata: { previous, current: { enabled: airport.enabled, radiusM: airport.radiusM } },
+        requestId: req.requestId, outcome: "success",
+      }], { session });
+      return airport;
+    });
+    res.json({ data: result });
   });
   router.patch("/:id", async (req: AdminRequest, res) => {
     const airportId = z
@@ -113,9 +150,7 @@ export function airportAdminRouter() {
       if (!airport)
         throw Object.assign(new Error("Airport not found."), { status: 404 });
       if (!settings.enabled) {
-        await AirportSession.updateMany({ airport: airport._id, status: "active" }, { $set: { status: "ended", endedAt: new Date() } }, { session });
-        await AirportConnection.updateMany({ airport: airport._id, state: "pending" }, { $set: { state: "ended" } }, { session });
-        await AirportConnection.updateMany({ airport: airport._id, state: "connected", validUntil: { $gt: new Date() } }, { $set: { validUntil: new Date(), decisionUntil: new Date(Date.now() + 86400000) } }, { session });
+        await closeAirportVisits(airport._id, session);
       }
       await AuditLog.create(
         [

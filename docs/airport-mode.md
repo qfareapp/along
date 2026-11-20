@@ -14,7 +14,7 @@ Airport Mode is an opt-in Discover mode. It uses existing accounts and protected
 
 Only foreground location is used. A fresh fix (up to two minutes old, reported accuracy at most 150m) is required for activation. Precise user coordinates are processed for eligibility but never stored, returned to another member or put in a push payload. This is approximate proximity, not proof of terminal or immigration access; client location can be spoofed.
 
-Configured airport polygons include a 500m perimeter allowance. Without a polygon, proximity uses an explicitly configured reference-point radius (default 500m), labelled approximate. A reference coordinate does not describe a large airport's entire footprint. Configure appropriate verified boundaries before claiming full-premises coverage.
+Configured airport polygons include a 500m perimeter allowance. Without a polygon, proximity uses an explicitly configured reference-point radius (default 1km), labelled approximate. A reference coordinate does not describe a large airport's entire footprint. Configure appropriate verified boundaries before claiming full-premises coverage.
 
 While active, the app checks location every minute. Two outside readings at least one minute apart confirm departure. Presence expires after five minutes without renewal, even if the selected visit is longer. Consequently backgrounding/closing the app can end visibility; returning requires explicit check-in again. Departure while closed is handled on reopening, not by background GPS. Server reads independently enforce availability/presence expiry; the cleanup worker is not the authorization boundary.
 
@@ -34,17 +34,18 @@ To import into the database configured by `MONGODB_URI`, an operator runs:
 npm run airports:import -- --apply
 ```
 
-The importer is repeatable, validates records, skips invalid/duplicate source IDs, never deletes airports, and preserves enabled status, zones, radius, boundaries and configuration sources. New airports are disabled. Imports are never part of application startup or deployment. The implementation work ran only the dry run and imports into isolated test databases; no production import was performed.
+The importer is repeatable, validates records, skips invalid/duplicate source IDs, never deletes airports, and preserves enabled status, zones, radius, boundaries and configuration sources. New airports are disabled. Imports are never part of application startup or deployment. On 20 November 2026, the owner authorised importing all 141 supplied records into the configured database. All 141 were inserted and verified against the source coordinates with a 1km radius, initially disabled. Belgharia remains a separate enabled test location, giving 142 locations in total at import verification.
 
 ## Configure and launch
 
-For location testing, Belgharia is available as a separate, explicitly labelled **Belgharia (Demo Airport)** seed at latitude `22.670388020903303`, longitude `88.3886244482948`, with a 500m radius and a synthetic demo test area. It has no invented IATA/ICAO code and is not part of the real airport spreadsheet import.
+For location testing, Belgharia is available as a separate, explicitly labelled **Belgharia (Demo Airport)** seed at latitude `22.670388020903303`, longitude `88.3886244482948`, with a 1km radius and a synthetic demo test area. It has no invented IATA/ICAO code and is not part of the real airport spreadsheet import.
 
 From `apps/api`, run `npm run airports:demo` to preview it, or `npm run airports:demo -- --apply` to add it to the configured database. A new demo record is enabled for testing. Re-running updates its identifying data/coordinates but preserves admin changes to its enabled status, radius and zones. Disable it through admin when testing is complete. It is never seeded automatically at startup.
 
 1. Deploy the API and admin changes using the existing deployment settings. No new service, database, Firebase project or private key is required.
 2. Run the explicit import against the intended database.
-3. Open admin **Airport Mode** with `settings.manage` permission. Search for CCU and configure a source/review note, boundary or approximate radius, and verified broad zones. Zone IDs must be unique. Both zones must list one another to allow coffee invitations, including self-compatibility when appropriate. Empty compatibility lists allow remote conversation without a meeting recommendation. Do not invent zones, terminal connectivity or meeting spots.
+3. Open admin **Airport Mode** with `settings.manage` permission. Each airport has an **Enable / Disable** button and a detection-radius slider (100m–15km). Dragging previews the value; **Save radius** persists it and **Reset** discards the draft. Updates affect only the chosen setting on that airport and commit with an audit entry. Enabling an imported airport with no zones adds a single **Near airport (approximate)** area with no meeting compatibility, so discovery/chat can work without inventing terminal access. Existing zones, boundaries and review notes are preserved. Disabling ends active visits; re-enabling does not reactivate those visits.
+   Optional **Advanced configuration** remains available for verified boundaries and broad zones. Zone IDs must be unique. Both zones must list one another to allow coffee invitations, including self-compatibility when appropriate. Empty compatibility lists allow remote conversation without a meeting recommendation. Do not invent zones, terminal connectivity or meeting spots.
 4. Enable the airport only after reviewing its configuration. Admin changes require existing cookie authentication, origin/CSRF protections, permission checks and an audit reason; the update and audit record commit together.
 5. Build/install an updated signed APK and test on two Android phones. Native location dependency/configuration already exists. Existing FCM setup and `PUSH_NOTIFICATIONS_ENABLED=true` control phone notifications. Existing Render Free sleeping behavior can delay workers and push delivery.
 
@@ -61,6 +62,8 @@ Chat reads, writes, attachments and games recheck account eligibility, block/unm
 No public traveller counts, gates, flight numbers, boarding passes, fabricated meeting spots, background location, future travel publication or automatic romantic matches are introduced.
 
 ## Verification
+
+The per-airport row controls passed all 30 airport API regression tests, including authenticated/RBAC/CSRF protections, radius validation, enabling an imported airport without invented terminal zones, preserving existing settings, audit entries and immediate visit termination on disable. API/admin typechecks and targeted admin lint passed. `tools/airport-admin-browser-qa.mjs` uses intercepted fictional admin responses to check enable/disable, radius preview/save, retry after failure, independent rows and search at 390px and 1280px. These UI tests do not modify the configured database. API/admin deployment is required for the new controls to appear in the hosted panel.
 
 `apps/api/src/airports.test.ts` uses an isolated in-memory MongoDB replica set. It covers import preservation, eligibility, expiry, privacy, zones, requests, concurrent acceptance/keep votes, chat history, game authorization, existing match preservation, scoped profiles and admin protection. The targeted regression run passed 77 tests across airports, account deletion, chat, discovery, Play and push. All three apps passed TypeScript checks; mobile lint and Android JavaScript export passed.
 

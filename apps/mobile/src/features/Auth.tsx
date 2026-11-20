@@ -1,7 +1,7 @@
 import React, { useRef, useState } from "react";
 import DateTimeField from "../components/DateTimeField";
 import { adultBirthDateLimit, parseLocalDate } from "../components/dateTime";
-import { Pressable, Text, View } from "react-native";
+import { Pressable, Switch, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
 import { z } from "zod";
@@ -54,6 +54,7 @@ export default function Auth() {
   const [register, setRegister] = useState(params.mode === "register");
   const [step, setStep] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const steps: (keyof Values)[] = register
     ? ["email", "password", "name", "birthDate"]
     : ["email", "password"];
@@ -121,6 +122,10 @@ export default function Auth() {
   }
   async function submit(values: Values) {
     setError("");
+    if (register && !acceptedPolicies) {
+      setError("Please agree to the Terms and Community Guidelines before creating your account.");
+      return;
+    }
     const parsed = (
       register ? formSchema : formSchema.pick({ email: true, password: true })
     ).safeParse(values);
@@ -138,7 +143,7 @@ export default function Auth() {
         user: { name: string };
       }>(`/auth/${register ? "register" : "login"}`, {
         method: "POST",
-        body: JSON.stringify(parsed.data),
+        body: JSON.stringify({ ...parsed.data, ...(register ? { acceptTerms: true } : {}) }),
       });
       await storeSession(result.accessToken, result.refreshToken);
       client.clear();
@@ -314,6 +319,13 @@ export default function Auth() {
             {error}
           </Text>
         ) : null}
+        {register && lastStep && <View style={{ gap: 8, marginBottom: 16 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <Switch accessibilityLabel="Agree to Terms and Community Guidelines" value={acceptedPolicies} onValueChange={setAcceptedPolicies} />
+            <Text style={[text.body, { flex: 1, fontSize: 13 }]}>I agree to the Terms and Community Guidelines and have read the Privacy Policy.</Text>
+          </View>
+          <Pressable accessibilityRole="link" onPress={() => router.push("/policies?section=terms")} style={{ paddingVertical: 10 }}><Text style={{ color: c.teal }}>Read Terms & Community Guidelines</Text></Pressable>
+        </View>}
         <Button loading={busy} onPress={() => void next()}>
           {lastStep ? (register ? "Create Account" : "Sign In") : "Continue"}
         </Button>
@@ -326,6 +338,7 @@ export default function Auth() {
             setStep(0);
             setValue("password", "");
             setShowPassword(false);
+            setAcceptedPolicies(false);
             clearErrors();
             setError("");
           }}
@@ -353,6 +366,9 @@ export default function Auth() {
             </Text>
           </Pressable>
         )}
+        <Pressable accessibilityRole="link" onPress={() => router.push("/policies?section=privacy")} style={{ paddingVertical: 12 }}>
+          <Text style={[text.muted, { textAlign: "center", fontSize: 12 }]}>Privacy Policy</Text>
+        </Pressable>
         {register && lastStep && (
           <Pressable
             accessibilityRole="link"

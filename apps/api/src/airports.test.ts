@@ -692,3 +692,39 @@ test("admin airport configuration enforces RBAC, CSRF, valid zones and auditing"
   await AdminRole.updateOne({ _id: role._id }, { permissions: [] });
   await request(app).get("/api/v1/admin/airports").set(headers).expect(403);
 });
+
+test("row controls enable imported airports, preserve other settings and end visits when disabled", async () => {
+  const role = await AdminRole.create({ slug: `controls-${crypto.randomUUID()}`, name: "Airport controls operator", permissions: ["settings.manage"] });
+  const operator = await User.create({ name: "Airport controls operator", email: `controls-${crypto.randomUUID()}@example.test`, passwordHash: "fixture", adminRole: role.slug });
+  const secret = crypto.randomBytes(48).toString("base64url"), csrf = crypto.randomBytes(24).toString("hex");
+  await AdminSession.create({ user: operator._id, tokenHash: digest(secret), csrf, expiresAt: new Date(Date.now() + 600000), lastSeenAt: new Date() });
+  const headers = { Cookie: `along_admin=${secret}`, Origin: "http://localhost:3000", "X-CSRF-Token": csrf };
+  const path = `/api/v1/admin/airports/${airportId}/controls`;
+  await Airport.updateOne({ _id: airportId }, { $set: { enabled: false, zones: [], radiusM: 1000 } });
+  await request(app).patch(path).set(auth(0)).send({ enabled: true }).expect(401);
+  await request(app).patch(path).set({ ...headers, "X-CSRF-Token": "wrong" }).send({ enabled: true }).expect(403);
+  for (const invalid of [{}, { radiusM: 99 }, { radiusM: 15001 }, { radiusM: 1000.5 }, { enabled: "true" }, { enabled: true, zones: [] }]) {
+    await request(app).patch(path).set(headers).send(invalid).expect(400);
+  }
+  const enabled = await request(app).patch(path).set(headers).send({ enabled: true }).expect(200);
+  assert.equal(enabled.body.data.enabled, true);
+  assert.deepEqual(enabled.body.data.zones.map((z: { id: string; compatibleWith: string[] }) => ({ id: z.id, compatibleWith: z.compatibleWith })), [{ id: "near-airport", compatibleWith: [] }]);
+  await api(0, "post", "/airports/check-in", { airportId, zoneId: "near-airport", minutes: 60, intentions: ["conversation"], consent: true, location: pos() }).expect(201);
+  const boundary = [[88.44, 22.64], [88.46, 22.64], [88.46, 22.66], [88.44, 22.64]];
+  await Airport.updateOne({ _id: airportId }, { $set: { configurationSource: "Existing independently verified configuration", boundary } });
+  const changed = await request(app).patch(path).set(headers).send({ radiusM: 2500 }).expect(200);
+  assert.equal(changed.body.data.radiusM, 2500);
+  assert.equal(changed.body.data.enabled, true);
+  assert.equal(changed.body.data.configurationSource, "Existing independently verified configuration");
+  assert.deepEqual(changed.body.data.boundary, boundary);
+  assert.equal(changed.body.data.zones[0].id, "near-airport");
+  assert.equal((await AirportSession.findOne({ user: ids[0] }))!.status, "active");
+  await request(app).patch(path).set(headers).send({ enabled: false }).expect(200);
+  assert.equal((await AirportSession.findOne({ user: ids[0] }))!.status, "ended");
+  assert.equal((await api(0, "get", "/airports/me")).body.data.active, false);
+  await request(app).patch(path).set(headers).send({ enabled: true }).expect(200);
+  assert.equal((await AirportSession.findOne({ user: ids[0] }))!.status, "ended");
+  assert.equal(await AuditLog.countDocuments({ targetId: airportId, action: "airport.controls" }), 4);
+  await AdminRole.updateOne({ _id: role._id }, { permissions: [] });
+  await request(app).patch(path).set(headers).send({ enabled: false }).expect(403);
+});

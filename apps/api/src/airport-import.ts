@@ -57,7 +57,7 @@ export async function importAirports(input: unknown[]) {
         $set: airport,
         $setOnInsert: {
           enabled: false,
-          radiusM: 500,
+          radiusM: 1000,
           timezone: "Asia/Kolkata",
           zones: [],
         },

@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import sharp from "sharp";
-import { MongoMemoryServer } from "mongodb-memory-server";
+import { MongoMemoryReplSet } from "mongodb-memory-server";
 process.env.ADMIN_AUTH_MODE = "mfa";
 process.env.PHOTO_STORAGE = "mongodb";
 const mediaDirectory = await mkdtemp(path.join(os.tmpdir(), "along-chat-"));
@@ -20,12 +20,12 @@ const { User, ProfileSwipe, Match, Conversation } = await import("./models.js");
 const { eligibleProfile } = await import("./test-fixtures.js");
 const { tokens } = await import("./auth.js");
 const app = createApp();
-let db: MongoMemoryServer;
+let db: MongoMemoryReplSet;
 const ids: Record<string, string> = {},
   access: Record<string, string> = {};
 before(
   async () => {
-    db = await MongoMemoryServer.create();
+    db = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
     await mongoose.connect(db.getUri());
     await ProfileSwipe.init();
     await Match.init();

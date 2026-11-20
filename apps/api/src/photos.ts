@@ -64,12 +64,13 @@ export async function storePhoto(bytes: Buffer, owner: string) {
 }
 export async function deleteCloudinaryPhoto(publicId: string) {
   try {
-    await cloudinary.uploader.destroy(publicId, {
+    const result = await cloudinary.uploader.destroy(publicId, {
       ...credentials(),
       resource_type: "image",
       type: "authenticated",
       invalidate: true,
     });
+    if (!["ok", "not found"].includes(result.result)) throw new Error("Media deletion was not acknowledged.");
   } catch {
     throw fail("Cloudinary could not remove the photo. Please retry.");
   }
