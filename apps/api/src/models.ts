@@ -352,6 +352,8 @@ const messageSchema = new Schema(
     conversation: ref("Conversation"),
     sender: ref("User"),
     text: { type: String, default: "", maxlength: 2000 },
+    clientId: { type: String, maxlength: 100 },
+    requestHash: { type: String, select: false },
     attachment: {
       kind: { type: String, enum: ["image", "file"] },
       asset: { type: String, select: false },
@@ -370,6 +372,7 @@ const messageSchema = new Schema(
   { timestamps: true },
 );
 messageSchema.index({ conversation: 1, _id: -1 });
+messageSchema.index({ conversation: 1, sender: 1, clientId: 1 }, { unique: true, partialFilterExpression: { clientId: { $type: "string" } } });
 messageSchema.index({ gameEventKey: 1 }, { unique: true, sparse: true });
 messageSchema.index({ socialMoment: 1, createdAt: -1 }, { sparse: true });
 export const Message = mongoose.model("Message", messageSchema);

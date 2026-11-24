@@ -2,8 +2,10 @@ import { Router, type NextFunction, type Response } from "express";
 import mongoose from "mongoose";
 import { z } from "zod";
 import jwt from "jsonwebtoken";
+import crypto from "node:crypto";
 import multer, { MulterError } from "multer";
 import { compressPhoto } from "./compress-photo.js";
+import { validateDocument } from "./document-validation.js";
 import { rateLimit } from "express-rate-limit";
 import { memberRateKey, rateLimitMessage } from "./rate-limits.js";
 import { chatEvents } from "./chat-events.js";
@@ -79,7 +81,9 @@ async function blockedWith(userId: string) {
 }
 
 /** Backfills matches for mutual likes made before conversations existed. */
+const backfillChecks = new Map<string, number>();
 async function backfillMatches(userId: string) {
+  if (Date.now() - (backfillChecks.get(userId) ?? 0) < 3600000) return;
   const liked = await ProfileSwipe.find({
     user: userId,
     action: "like",
@@ -99,6 +103,9 @@ async function backfillMatches(userId: string) {
   for (const id of mutual)
     if (!existing.has(pairKey(userId, String(id))))
       await ensureMatch(userId, String(id));
+  if (backfillChecks.size >= 1000)
+    backfillChecks.delete(backfillChecks.keys().next().value!);
+  backfillChecks.set(userId, Date.now());
 }
 
 async function mainPhotos(userIds: string[]) {
@@ -129,10 +136,32 @@ export async function openConversation(userId: string, id: string) {
   const conversation = await Conversation.findById(id).lean();
   if (conversation?.airportConnection) {
     const { airportConnectionAccess } = await import("./airports.js");
-    const { grant, otherId, canSend } = await airportConnectionAccess(userId, conversation.airportConnection);
-    const other = await User.findOne({ _id: otherId, status: "active", adminRole: null }).select("name identityVerified").lean();
+    const { grant, otherId, canSend } = await airportConnectionAccess(
+      userId,
+      conversation.airportConnection,
+    );
+    const other = await User.findOne({
+      _id: otherId,
+      status: "active",
+      adminRole: null,
+    })
+      .select("name identityVerified")
+      .lean();
     if (!other) throw fail(404, "Conversation unavailable.");
-    return { conversation, match: { _id: grant._id, users: grant.users, active: true, activity: undefined, createdAt: grant.createdAt, updatedAt: grant.updatedAt }, other, otherId, airportCanSend: canSend };
+    return {
+      conversation,
+      match: {
+        _id: grant._id,
+        users: grant.users,
+        active: true,
+        activity: undefined,
+        createdAt: grant.createdAt,
+        updatedAt: grant.updatedAt,
+      },
+      other,
+      otherId,
+      airportCanSend: canSend,
+    };
   }
   const match = conversation
     ? await Match.findById(conversation.match).lean()
@@ -202,15 +231,12 @@ const FILE_TYPES: Record<string, string[]> = {
   "application/pdf": [".pdf"],
   "text/plain": [".txt"],
   "text/csv": [".csv"],
-  "application/msword": [".doc"],
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
     ".docx",
   ],
-  "application/vnd.ms-excel": [".xls"],
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [
     ".xlsx",
   ],
-  "application/vnd.ms-powerpoint": [".ppt"],
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": [
     ".pptx",
   ],
@@ -218,7 +244,7 @@ const FILE_TYPES: Record<string, string[]> = {
 const MAX_UPLOAD = 20 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_UPLOAD, files: 1, fields: 1, fieldSize: 4000 },
+  limits: { fileSize: MAX_UPLOAD, files: 1, fields: 2, fieldSize: 8000 },
 }).single("file");
 function receiveAttachment(
   req: AuthedRequest,
@@ -251,7 +277,9 @@ export async function assertCanSend(
   conversation: { _id: unknown; firstSender?: unknown },
 ) {
   const me = await User.findById(userId).select("restrictions").lean();
-  const record = await Conversation.findById(conversation._id).select("airportConnection").lean();
+  const record = await Conversation.findById(conversation._id)
+    .select("airportConnection")
+    .lean();
   if (record?.airportConnection) {
     const { airportConnectionAccess } = await import("./airports.js");
     await airportConnectionAccess(userId, record.airportConnection, true);
@@ -288,6 +316,117 @@ async function attachmentMessage(
   };
 }
 const linkAudience = "along-chat-attachment";
+const submissionId = z
+  .string()
+  .regex(/^[a-zA-Z0-9_-]{8,100}$/)
+  .optional();
+const contentHash = (text: string, bytes?: Buffer) =>
+  crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        text,
+        file: bytes
+          ? crypto.createHash("sha256").update(bytes).digest("hex")
+          : null,
+      }),
+    )
+    .digest("hex");
+async function discardAttachment(asset: string) {
+  try {
+    await removeChatAttachment(asset);
+  } catch {
+    try {
+      const { queueAsset } = await import("./account-deletion.js");
+      await mongoose.connection.transaction((session) =>
+        queueAsset(asset, session),
+      );
+    } catch {
+      console.error(
+        JSON.stringify({
+          event: "orphan_media_cleanup_failed",
+          severity: "error",
+        }),
+      );
+    }
+  }
+}
+async function replayMessage(
+  conversation: unknown,
+  sender: string,
+  clientId: string | undefined,
+  hash: string,
+  session?: mongoose.ClientSession,
+) {
+  if (!clientId) return null; // Compatibility with older installed clients.
+  const previous = await Message.findOne({ conversation, sender, clientId })
+    .select("+requestHash")
+    .session(session ?? null);
+  if (previous && previous.requestHash !== hash)
+    throw fail(
+      409,
+      "This message submission was already used for different content.",
+    );
+  return previous;
+}
+async function persistDirectMessage(input: {
+  conversation: mongoose.Types.ObjectId;
+  sender: string;
+  recipient: string;
+  text: string;
+  clientId?: string;
+  requestHash: string;
+  attachment?: {
+    kind: "image" | "file";
+    asset: string;
+    name: string;
+    mimeType: string;
+    size: number;
+  };
+}) {
+  await Message.init();
+  try {
+    return await mongoose.connection.transaction(async (session) => {
+      const old = await replayMessage(
+        input.conversation,
+        input.sender,
+        input.clientId,
+        input.requestHash,
+        session,
+      );
+      if (old) return old;
+      const [message] = await Message.create([input], { session });
+      await Conversation.updateOne(
+        { _id: input.conversation },
+        { $set: { updatedAt: new Date() } },
+        { session },
+      );
+      await enqueuePush(
+        {
+          key: `message:${message!._id}`,
+          user: input.recipient,
+          actor: input.sender,
+          kind: "message",
+          target: String(input.conversation),
+          message: String(message!._id),
+        },
+        session,
+      );
+      return message!;
+    });
+  } catch (error) {
+    if ((error as { code?: number }).code === 11000) {
+      const previous = await replayMessage(
+        input.conversation,
+        input.sender,
+        input.clientId,
+        input.requestHash,
+      );
+      if (previous) return previous;
+    }
+    throw error;
+  }
+}
 
 export function chatRouter() {
   const router = Router();
@@ -329,100 +468,325 @@ export function chatRouter() {
     legacyHeaders: false,
   });
 
-  router.get("/", async (req: AuthedRequest, res) => {
+  const inbox = async (req: AuthedRequest, res: Response) => {
     const userId = req.userId!;
-    await backfillMatches(userId);
-    const matches = await Match.find({ users: userId, active: true }).lean();
-    const others = matches.map((m) =>
-      String(m.users.find((u) => String(u) !== userId)),
-    );
-    const [users, blocked, photos, conversations] = await Promise.all([
-      User.find({ _id: { $in: others }, status: "active", adminRole: null })
-        .select("name identityVerified")
-        .lean(),
-      blockedWith(userId),
-      mainPhotos(others),
-      Conversation.find({ match: { $in: matches.map((m) => m._id) } }).lean(),
-    ]);
-    const userById = new Map(users.map((u) => [String(u._id), u]));
-    const convByMatch = new Map(conversations.map((c) => [String(c.match), c]));
-    const rows = await Promise.all(
-      matches.map(async (m, i) => {
-        const otherId = others[i];
-        const other = userById.get(otherId);
-        const conversation = convByMatch.get(String(m._id));
-        if (!other || !conversation || blocked.has(otherId)) return null;
-        const [last, unread] = await Promise.all([
-          Message.findOne({ conversation: conversation._id })
-            .sort({ _id: -1 })
-            .lean(),
-          Message.countDocuments({
-            conversation: conversation._id,
-            sender: { $ne: userId },
-            readAt: null,
-          }),
-        ]);
-        if (
-          !last &&
-          conversation.firstSender &&
-          String(conversation.firstSender) !== userId
-        )
-          return null;
-        return {
-          id: String(conversation._id),
-          matchedAt: m.createdAt,
-          activityConnection: !!m.activity,
-          member: {
-            id: otherId,
-            name: other.name,
-            identityVerified: other.identityVerified,
-            photoId: photos.get(otherId) ?? null,
-          },
-          lastMessage: last ? serialize(last, userId) : null,
-          unread,
-        };
-      }),
-    );
-    const { AirportConnection } = await import("./airport-models.js");
-    const airportGrants = await AirportConnection.find({ users: userId, state: "connected", decisionUntil: { $gt: new Date() }, conversation: { $exists: true } }).lean();
-    for (const grant of airportGrants) {
+    const input = z
+      .object({
+        cursor: z.string().max(200).optional(),
+        limit: z.coerce.number().int().min(1).max(50).default(30),
+      })
+      .parse(req.query);
+    let cursor: { updatedAt: Date; id: mongoose.Types.ObjectId } | null = null;
+    if (input.cursor) {
       try {
-        const { conversation, other, otherId } = await openConversation(userId, String(grant.conversation));
-        const last = await Message.findOne({ conversation: conversation._id }).sort({ _id: -1 }).lean();
-        const unread = await Message.countDocuments({ conversation: conversation._id, sender: { $ne: userId }, readAt: null });
-        rows.push({ id: String(conversation._id), matchedAt: grant.createdAt, activityConnection: true, member: { id: otherId, name: other.name, identityVerified: other.identityVerified, photoId: (await mainPhotos([otherId])).get(otherId) ?? null }, lastMessage: last ? serialize(last, userId) : null, unread });
-      } catch (error) {
-        if (![403, 404].includes((error as { status?: number }).status ?? 0)) throw error;
+        const value = z
+          .object({
+            date: z.iso.datetime(),
+            id: z.string().regex(/^[a-f0-9]{24}$/i),
+          })
+          .parse(
+            JSON.parse(Buffer.from(input.cursor, "base64url").toString("utf8")),
+          );
+        cursor = {
+          updatedAt: new Date(value.date),
+          id: new mongoose.Types.ObjectId(value.id),
+        };
+      } catch {
+        throw fail(400, "Invalid conversation cursor.");
       }
     }
-    const data = rows
-      .filter((r) => !!r)
-      .sort(
-        (a, b) =>
-          +new Date(b.lastMessage?.createdAt ?? b.matchedAt ?? 0) -
-          +new Date(a.lastMessage?.createdAt ?? a.matchedAt ?? 0),
-      );
-    res.json({ data });
-  });
+    await backfillMatches(userId);
+    const { AirportConnection } = await import("./airport-models.js");
+    const blocked = await blockedWith(userId);
+    const oid = new mongoose.Types.ObjectId(userId);
+    const hasAirport = await AirportConnection.exists({
+      users: oid,
+      state: "connected",
+      decisionUntil: { $gt: new Date() },
+    });
+    const ready = hasAirport
+      ? await import("./onboarding.js").then((m) => m.discoveryUserIds())
+      : [];
+    const pipeline: mongoose.PipelineStage[] = [
+      { $match: { users: oid, active: true } },
+      {
+        $lookup: {
+          from: Conversation.collection.name,
+          localField: "_id",
+          foreignField: "match",
+          as: "chat",
+        },
+      },
+      { $unwind: "$chat" },
+      {
+        $project: {
+          _id: "$chat._id",
+          users: 1,
+          matchedAt: "$createdAt",
+          activityConnection: { $ne: [{ $ifNull: ["$activity", null] }, null] },
+          airportConnection: { $literal: false },
+          firstSender: "$chat.firstSender",
+          updatedAt: "$chat.updatedAt",
+        },
+      },
+      {
+        $unionWith: {
+          coll: AirportConnection.collection.name,
+          pipeline: [
+            {
+              $match: {
+                users: oid,
+                state: "connected",
+                decisionUntil: { $gt: new Date() },
+                $expr: { $setIsSubset: ["$users", ready] },
+              },
+            },
+            {
+              $lookup: {
+                from: Match.collection.name,
+                localField: "pairKey",
+                foreignField: "pairKey",
+                as: "regular",
+              },
+            },
+            { $match: { "regular.active": { $ne: false } } },
+            {
+              $lookup: {
+                from: Conversation.collection.name,
+                localField: "conversation",
+                foreignField: "_id",
+                as: "chat",
+              },
+            },
+            { $unwind: "$chat" },
+            {
+              $project: {
+                _id: "$chat._id",
+                users: 1,
+                matchedAt: "$createdAt",
+                activityConnection: { $literal: true },
+                airportConnection: { $literal: true },
+                firstSender: "$chat.firstSender",
+                updatedAt: "$chat.updatedAt",
+              },
+            },
+          ],
+        },
+      },
+      {
+        $match: {
+          users: {
+            $nin: [...blocked].map((id) => new mongoose.Types.ObjectId(id)),
+          },
+        },
+      },
+      {
+        $lookup: {
+          from: User.collection.name,
+          localField: "users",
+          foreignField: "_id",
+          as: "members",
+          pipeline: [
+            { $match: { status: "active", adminRole: null } },
+            { $project: { name: 1, identityVerified: 1 } },
+          ],
+        },
+      },
+      { $match: { $expr: { $eq: [{ $size: "$members" }, 2] } } },
+      {
+        $facet: {
+          items: [
+            ...(cursor
+              ? [
+                  {
+                    $match: {
+                      $or: [
+                        { updatedAt: { $lt: cursor.updatedAt } },
+                        {
+                          updatedAt: cursor.updatedAt,
+                          _id: { $lt: cursor.id },
+                        },
+                      ],
+                    },
+                  },
+                ]
+              : []),
+            { $sort: { updatedAt: -1, _id: -1 } },
+            { $limit: input.limit + 1 },
+          ],
+          totals: [
+            {
+              $lookup: {
+                from: Message.collection.name,
+                localField: "_id",
+                foreignField: "conversation",
+                as: "unread",
+                pipeline: [
+                  { $match: { sender: { $ne: oid }, readAt: null } },
+                  { $count: "count" },
+                ],
+              },
+            },
+            {
+              $group: {
+                _id: null,
+                unread: {
+                  $sum: {
+                    $ifNull: [{ $arrayElemAt: ["$unread.count", 0] }, 0],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    ];
+    const [page] = await Match.aggregate(pipeline);
+    const items = (page?.items ?? []) as {
+      _id: mongoose.Types.ObjectId;
+      users: mongoose.Types.ObjectId[];
+      matchedAt: Date;
+      updatedAt: Date;
+      activityConnection: boolean;
+      airportConnection: boolean;
+      firstSender?: mongoose.Types.ObjectId;
+      members: {
+        _id: mongoose.Types.ObjectId;
+        name: string;
+        identityVerified: boolean;
+      }[];
+    }[];
+    const more = items.length > input.limit;
+    if (more) items.pop();
+    const ids = items.map((row) => row._id);
+    const [summaries, photos] = await Promise.all([
+      Message.aggregate([
+        { $match: { conversation: { $in: ids } } },
+        { $sort: { conversation: 1, _id: -1 } },
+        { $project: { "attachment.asset": 0 } },
+        {
+          $group: {
+            _id: "$conversation",
+            last: { $first: "$$ROOT" },
+            unread: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $ne: ["$sender", oid] },
+                      { $eq: [{ $ifNull: ["$readAt", null] }, null] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      mainPhotos(
+        items.flatMap((row) =>
+          row.users.filter((id) => String(id) !== userId).map(String),
+        ),
+      ),
+    ]);
+    const byConversation = new Map(
+      summaries.map((row) => [String(row._id), row]),
+    );
+    const rows = items.flatMap((row) => {
+      const summary = byConversation.get(String(row._id));
+      if (
+        !summary?.last &&
+        row.firstSender &&
+        String(row.firstSender) !== userId
+      )
+        return [];
+      const other = row.members.find(
+        (member) => String(member._id) !== userId,
+      )!;
+      return [
+        {
+          id: String(row._id),
+          matchedAt: row.matchedAt,
+          activityConnection: row.activityConnection,
+          airportConnection: row.airportConnection,
+          member: {
+            id: String(other._id),
+            name: other.name,
+            identityVerified: other.identityVerified,
+            photoId: photos.get(String(other._id)) ?? null,
+          },
+          lastMessage: summary?.last ? serialize(summary.last, userId) : null,
+          unread: summary?.unread ?? 0,
+        },
+      ];
+    });
+    const last = items.at(-1);
+    const nextCursor =
+      more && last
+        ? Buffer.from(
+            JSON.stringify({
+              date: last.updatedAt.toISOString(),
+              id: String(last._id),
+            }),
+          ).toString("base64url")
+        : null;
+    if (req.path === "/inbox")
+      res.json({
+        data: {
+          items: rows,
+          nextCursor,
+          totalUnread: page?.totals?.[0]?.unread ?? 0,
+        },
+      });
+    else
+      res.json({
+        data: rows,
+        nextCursor,
+        totalUnread: page?.totals?.[0]?.unread ?? 0,
+      });
+  };
+  router.get("/", inbox); // Legacy envelope; bounded first page.
+  router.get("/inbox", inbox);
 
   router.get("/:id", async (req: AuthedRequest, res) => {
     const userId = req.userId!;
-    const { conversation, match, other, otherId, airportCanSend } = await openConversation(
-      userId,
-      String(req.params.id),
-    );
-    const q = z.object({ after: z.string().optional() }).parse(req.query);
+    const { conversation, match, other, otherId, airportCanSend } =
+      await openConversation(userId, String(req.params.id));
+    const q = z
+      .object({
+        after: z
+          .string()
+          .regex(/^[a-f\d]{24}$/i)
+          .optional(),
+        before: z
+          .string()
+          .regex(/^[a-f\d]{24}$/i)
+          .optional(),
+      })
+      .refine((q) => !(q.before && q.after), "Choose one cursor.")
+      .parse(req.query);
     const after =
       q.after && mongoose.isObjectIdOrHexString(q.after) ? q.after : undefined;
     const messages = await Message.find({
       conversation: conversation._id,
       ...(after ? { _id: { $gt: after } } : {}),
+      ...(q.before ? { _id: { $lt: q.before } } : {}),
     })
-      .sort({ _id: -1 })
-      .limit(100)
+      .sort({ _id: after ? 1 : -1 })
+      .limit(101)
       .lean();
+    const more = messages.length > 100;
+    if (more) messages.pop();
+    if (!after) messages.reverse();
     await Message.updateMany(
-      { conversation: conversation._id, sender: { $ne: userId }, readAt: null },
+      {
+        _id: { $in: messages.map((m) => m._id) },
+        conversation: conversation._id,
+        sender: { $ne: userId },
+        readAt: null,
+      },
       { $set: { readAt: new Date() } },
     );
     const me = await User.findById(userId).select("restrictions").lean();
@@ -449,15 +813,20 @@ export function chatRouter() {
           identityVerified: other.identityVerified,
           photoId: (await mainPhotos([otherId])).get(otherId) ?? null,
         },
-        messages: messages.reverse().map((m) => serialize(m, userId)),
+        messages: messages.map((m) => serialize(m, userId)),
+        nextBefore: !after && more ? String(messages[0]!._id) : null,
+        nextAfter: after && more ? String(messages.at(-1)!._id) : null,
       },
     });
   });
 
   router.post("/:id/messages", sendLimit, async (req: AuthedRequest, res) => {
     const userId = req.userId!;
-    const { text } = z
-      .object({ text: z.string().trim().min(1).max(2000) })
+    const { text, clientId } = z
+      .object({
+        text: z.string().trim().min(1).max(2000),
+        clientId: submissionId,
+      })
       .strict()
       .parse(req.body);
     const { conversation, otherId } = await openConversation(
@@ -465,22 +834,13 @@ export function chatRouter() {
       String(req.params.id),
     );
     await assertCanSend(userId, conversation);
-    const message = await Message.create({
+    const message = await persistDirectMessage({
       conversation: conversation._id,
       sender: userId,
+      recipient: otherId,
       text,
-    });
-    await Conversation.updateOne(
-      { _id: conversation._id },
-      { $set: { updatedAt: new Date() } },
-    );
-    await enqueuePush({
-      key: `message:${message._id}`,
-      user: otherId,
-      actor: userId,
-      kind: "message",
-      target: String(conversation._id),
-      message: String(message._id),
+      clientId,
+      requestHash: contentHash(text),
     });
     res.status(201).json({ data: serialize(message.toObject(), userId) });
     chatEvents.emit("changed", String(conversation._id));
@@ -497,11 +857,25 @@ export function chatRouter() {
         String(req.params.id),
       );
       await assertCanSend(userId, conversation);
-      const { text } = z
-        .object({ text: z.string().trim().max(2000).default("") })
+      const { text, clientId } = z
+        .object({
+          text: z.string().trim().max(2000).default(""),
+          clientId: submissionId,
+        })
         .parse(req.body ?? {});
       const upload = req.file;
       if (!upload) throw fail(400, "Choose a photo or file to send.");
+      const requestHash = contentHash(text, upload.buffer);
+      const previous = await replayMessage(
+        conversation._id,
+        userId,
+        clientId,
+        requestHash,
+      );
+      if (previous)
+        return void res
+          .status(201)
+          .json({ data: serialize(previous.toObject(), userId) });
       const image = IMAGE_TYPES.includes(upload.mimetype);
       const extension = upload.originalname
         .toLowerCase()
@@ -517,6 +891,7 @@ export function chatRouter() {
       let bytes = upload.buffer;
       let name = cleanName(upload.originalname);
       let mimeType = upload.mimetype;
+      if (!image) validateDocument(bytes, mimeType);
       if (image) {
         if (bytes.length > 10 * 1024 * 1024)
           throw fail(413, "Choose a photo up to 10 MB.");
@@ -539,10 +914,13 @@ export function chatRouter() {
       );
       let message;
       try {
-        message = await Message.create({
+        message = await persistDirectMessage({
           conversation: conversation._id,
           sender: userId,
+          recipient: otherId,
           text,
+          clientId,
+          requestHash,
           attachment: {
             kind: image ? "image" : "file",
             asset,
@@ -552,21 +930,14 @@ export function chatRouter() {
           },
         });
       } catch (error) {
-        await removeChatAttachment(asset);
+        await discardAttachment(asset);
         throw error;
       }
-      await Conversation.updateOne(
-        { _id: conversation._id },
-        { $set: { updatedAt: new Date() } },
+      // A concurrent identical request may have persisted another uploaded copy.
+      const stored = await Message.findById(message._id).select(
+        "+attachment.asset",
       );
-      await enqueuePush({
-        key: `message:${message._id}`,
-        user: otherId,
-        actor: userId,
-        kind: "message",
-        target: String(conversation._id),
-        message: String(message._id),
-      });
+      if (stored?.attachment?.asset !== asset) await discardAttachment(asset);
       res.status(201).json({ data: serialize(message.toObject(), userId) });
       chatEvents.emit("changed", String(conversation._id));
     },
@@ -621,8 +992,12 @@ export function chatRouter() {
     );
     if (conversation.airportConnection) {
       const { AirportConnection } = await import("./airport-models.js");
-      await AirportConnection.updateOne({ _id: conversation.airportConnection }, { $set: { state: "ended" } });
-    } else await Match.updateOne({ _id: match._id }, { $set: { active: false } });
+      await AirportConnection.updateOne(
+        { _id: conversation.airportConnection },
+        { $set: { state: "ended" } },
+      );
+    } else
+      await Match.updateOne({ _id: match._id }, { $set: { active: false } });
     res.status(204).end();
   });
 

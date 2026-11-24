@@ -16,7 +16,8 @@ process.env.CHAT_MEDIA_DIR = mediaDirectory;
 process.env.JWT_SECRET = crypto.randomBytes(48).toString("hex");
 process.env.EMAIL_VERIFICATION_REQUIRED = "false";
 const { createApp } = await import("./app.js");
-const { User, ProfileSwipe, Match, Conversation } = await import("./models.js");
+const { User, ProfileSwipe, Match, Conversation, Message } =
+  await import("./models.js");
 const { eligibleProfile } = await import("./test-fixtures.js");
 const { tokens } = await import("./auth.js");
 const app = createApp();
@@ -138,6 +139,19 @@ test("both members can message; unread counts clear when read", async () => {
   );
 });
 
+test("APK inbox and message identifiers work with retries", async () => {
+  const inbox = await request(app).get("/api/v1/conversations/inbox?limit=1").set(as("asha"));
+  assert.equal(inbox.status, 200, JSON.stringify(inbox.body));
+  assert.equal(inbox.body.data.items[0].id, conversationId);
+  assert.equal(typeof inbox.body.data.totalUnread, "number");
+  const payload = { text: "APK compatibility", clientId: "apk-retry-1234" };
+  const first = await request(app).post(`/api/v1/conversations/${conversationId}/messages`).set(as("asha")).send(payload);
+  const second = await request(app).post(`/api/v1/conversations/${conversationId}/messages`).set(as("asha")).send(payload);
+  assert.equal(first.status, 201, JSON.stringify(first.body));
+  assert.equal(second.status, 201, JSON.stringify(second.body));
+  assert.equal(first.body.data.id, second.body.data.id);
+});
+
 test("members can send photos and documents that only the pair can open", async () => {
   const png = await sharp({
     create: { width: 40, height: 30, channels: 3, background: "#F47768" },
@@ -172,7 +186,7 @@ test("members can send photos and documents that only the pair can open", async 
     404,
   );
 
-  const pdf = Buffer.from("%PDF-1.4\n% Along test\n");
+  const pdf = Buffer.from("%PDF-1.4\n% Along test\n%%EOF\n");
   const doc = await request(app)
     .post(`/api/v1/conversations/${conversationId}/attachments`)
     .set(as("ben"))
@@ -256,6 +270,37 @@ test("members can send photos and documents that only the pair can open", async 
     ).status,
     404,
   );
+});
+
+test("F02 attachment retries use the same message and reject changed bytes", async () => {
+  const send = (bytes: string) =>
+    request(app)
+      .post(`/api/v1/conversations/${conversationId}/attachments`)
+      .set(as("ben"))
+      .field("clientId", "attachment-retry-001")
+      .field("text", "Trip notes")
+      .attach("file", Buffer.from(bytes), {
+        filename: "notes.csv",
+        contentType: "text/csv",
+      });
+  const responses = await Promise.all([
+    send("Place,Day\nAirport,Monday\n"),
+    send("Place,Day\nAirport,Monday\n"),
+  ]);
+  assert.deepEqual(
+    responses.map((r) => r.status),
+    [201, 201],
+    JSON.stringify(responses.map((r) => r.body)),
+  );
+  assert.equal(responses[0]!.body.data.id, responses[1]!.body.data.id);
+  assert.equal(
+    await Message.countDocuments({
+      conversation: conversationId,
+      clientId: "attachment-retry-001",
+    }),
+    1,
+  );
+  assert.equal((await send("Changed bytes\n")).status, 409);
 });
 
 test("outsiders cannot read or post in a conversation", async () => {
