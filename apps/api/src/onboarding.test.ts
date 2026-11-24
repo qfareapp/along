@@ -63,6 +63,18 @@ test("new member begins onboarding in the existing unique profile", async () => 
   assert.equal(r.body.data.profile.onboarding.currentStep, 1);
   assert.equal(await Profile.countDocuments({ user: id }), 1);
 });
+test("optional profile saves accept any subset and reject unknown details", async () => {
+  const update = await request(app).patch("/api/v1/profile/optional").set(auth()).send({ bio: "Hello", occupation: "Designer", details: { hobbies: "Pottery" } });
+  assert.equal(update.status, 200, JSON.stringify(update.body));
+  const saved = await Profile.findOne({ user: id });
+  assert.equal(saved?.bio, "Hello");
+  assert.equal(saved?.occupation, "Designer");
+  assert.equal(saved?.optionalDetails?.get("hobbies"), "Pottery");
+  const empty = await request(app).patch("/api/v1/profile/optional").set(auth()).send({ bio: "Updated", details: {} });
+  assert.equal(empty.status, 200, JSON.stringify(empty.body));
+  const invalid = await request(app).patch("/api/v1/profile/optional").set(auth()).send({ details: { unknown: "value" } });
+  assert.equal(invalid.status, 400);
+});
 test("zero vibes and unknown enum values cannot continue", async () => {
   for (const vibes of [[], ["unknown"]])
     assert.equal(

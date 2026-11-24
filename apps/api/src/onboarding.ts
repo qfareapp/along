@@ -581,7 +581,7 @@ export function onboardingRouter() {
         occupation: z.string().trim().max(100).optional(),
         bio: z.string().trim().max(600).optional(),
         details: z
-          .record(z.enum(fields), z.string().trim().max(160))
+          .partialRecord(z.enum(fields), z.string().trim().max(160))
           .optional(),
       })
       .strict()
