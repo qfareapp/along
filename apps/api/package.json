@@ -19,7 +19,8 @@
     "test": "tsx --test --test-concurrency=1 src/**/*.test.ts",
     "seed": "tsx src/seed.ts",
     "airports:import": "tsx src/airport-import.ts",
-    "airports:demo": "tsx src/airport-demo.ts"
+    "airports:demo": "tsx src/airport-demo.ts",
+    "communities:seed": "tsx src/community-seed-cli.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

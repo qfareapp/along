@@ -206,6 +206,14 @@ export const Category = mongoose.model(
 export const activitySchema = new Schema(
   {
     creator: ref("User"),
+    community: { type: Schema.Types.ObjectId, ref: "Community", index: true },
+    participationPolicy: {
+      type: String,
+      enum: ["approval", "open"],
+      default: "approval",
+    },
+    communityRequestKey: { type: String, maxlength: 100 },
+    communityReminderAt: Date,
     visibility: {
       type: String,
       enum: ["public", "private"],
@@ -275,6 +283,14 @@ activitySchema.index({ approximateLocation: "2dsphere" }, { sparse: true });
 activitySchema.index({ status: 1, category: 1, _id: -1 });
 activitySchema.index({ status: 1, category: 1, startsAt: 1, _id: 1 });
 activitySchema.index({ creator: 1, status: 1 });
+activitySchema.index({ community: 1, status: 1, startsAt: 1, _id: 1 });
+activitySchema.index(
+  { creator: 1, communityRequestKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { communityRequestKey: { $type: "string" } },
+  },
+);
 export const Activity = mongoose.model("ActivityPost", activitySchema);
 const interestSchema = new Schema(
   {
@@ -283,7 +299,7 @@ const interestSchema = new Schema(
     readAt: Date,
     status: {
       type: String,
-      enum: ["pending", "accepted", "declined"],
+      enum: ["pending", "accepted", "declined", "cancelled", "waitlisted"],
       default: "pending",
     },
     responseReadAt: Date,
@@ -318,7 +334,10 @@ export const Conversation = mongoose.model(
   new Schema(
     {
       match: { ...ref("Match"), unique: true },
-      airportConnection: { type: Schema.Types.ObjectId, ref: "AirportConnection" },
+      airportConnection: {
+        type: Schema.Types.ObjectId,
+        ref: "AirportConnection",
+      },
       firstSender: { type: Schema.Types.ObjectId, ref: "User" },
     },
     { timestamps: true },
@@ -375,6 +394,11 @@ export const Report = mongoose.model(
       message: { type: Schema.Types.ObjectId, ref: "Message" },
       group: { type: Schema.Types.ObjectId, ref: "PlanGroup" },
       groupMessage: { type: Schema.Types.ObjectId, ref: "PlanGroupMessage" },
+      community: { type: Schema.Types.ObjectId, ref: "Community" },
+      communityMessage: {
+        type: Schema.Types.ObjectId,
+        ref: "CommunityMessage",
+      },
       evidenceText: { type: String, maxlength: 2000, select: false },
       expiresAt: { type: Date, index: { expireAfterSeconds: 0 } },
       reason: { type: String, required: true, maxlength: 1500 },

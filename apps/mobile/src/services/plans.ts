@@ -20,6 +20,8 @@ export type PlanCategory = {
   ownManagedCount?: number;
 };
 export type PlanRecord = {
+  communityId?: string | null;
+  participationPolicy?: "approval" | "open";
   audience?: PlanAudience | null;
   privatePlan?: boolean;
   _id: string;
@@ -44,7 +46,8 @@ export type PlanRecord = {
   publicationStatus?: "active" | "paused";
   saved: boolean;
   interested: boolean;
-  interestStatus: "pending" | "accepted" | "declined" | null;
+  interestStatus:
+    "pending" | "accepted" | "declined" | "cancelled" | "waitlisted" | null;
   conversationId: string | null;
   isOwner: boolean;
   creator: {

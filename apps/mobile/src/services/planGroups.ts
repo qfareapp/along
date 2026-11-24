@@ -1,8 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, demoMode } from "./api";
 import { useCompletion } from "./onboarding";
+import { useEventGroupLive } from "./communities";
 export type GroupMode = "everyone" | "organiser_only";
 export type GroupMessage = {
+  pinned?: boolean;
+  deleted?: boolean;
+  reply?: { name: string; text: string } | null;
+  reactions?: { emoji: string; count: number; own: boolean }[];
   id: string;
   sequence: number;
   text: string;
@@ -12,6 +17,7 @@ export type GroupMessage = {
   sender: { id: string; name: string; isOrganiser: boolean };
 };
 export type PlanGroupSummary = {
+  muted?: boolean;
   id: string;
   activityId: string;
   title: string;
@@ -42,6 +48,7 @@ export function usePlanGroups(poll = false) {
   });
 }
 export function usePlanGroupThread(id: string, active: boolean) {
+  useEventGroupLive(id, active);
   return useQuery({
     queryKey: ["plan-group", id],
     enabled: !demoMode && !!id && active,

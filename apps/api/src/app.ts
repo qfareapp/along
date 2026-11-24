@@ -43,6 +43,10 @@ import { eraseAccount } from "./account-deletion.js";
 import { safetyRouter } from "./safety.js";
 import { publicPoliciesRouter } from "./public-policies.js";
 import { policyVersion } from "../../../packages/policies/index.js";
+import { communitiesRouter } from "./communities.js";
+import { communityAccess } from "./community-service.js";
+import { Community } from "./community-models.js";
+import { announceCommunityPlan } from "./community-notifications.js";
 import {
   activityInput,
   checkPlanDetails,
@@ -117,6 +121,7 @@ export function createApp() {
   app.use("/api/v1/conversations", chatRouter());
   app.use("/api/v1/notifications", notificationsRouter());
   app.use("/api/v1/social", socialRouter());
+  app.use("/api/v1/communities", communitiesRouter());
   app.use("/api/v1/games", playRouter());
   app.use("/api/v1/plan-groups", planGroupsRouter());
   app.use("/api/v1/vibe-checks", vibeChecksRouter());
@@ -142,7 +147,18 @@ export function createApp() {
       name: body.name,
       birthDate: body.birthDate,
     });
-    await Profile.create({ user: user._id, ...(body.acceptTerms ? { consents: { termsAt: new Date(), guidelinesAt: new Date(), version: policyVersion } } : {}) });
+    await Profile.create({
+      user: user._id,
+      ...(body.acceptTerms
+        ? {
+            consents: {
+              termsAt: new Date(),
+              guidelinesAt: new Date(),
+              version: policyVersion,
+            },
+          }
+        : {}),
+    });
     res.status(201).json({
       data: {
         ...(await tokens(String(user._id))),
@@ -333,14 +349,68 @@ export function createApp() {
             "This category is not available in your profile city.",
           );
       }
-      res.status(201).json({
-        data: await Activity.create({
-          ...input,
-          ...audience,
-          creator: req.userId,
-          status: category.moderationRequired ? "paused" : "active",
-        }),
-      });
+      const create = async (session?: mongoose.ClientSession) => {
+        if (input.communityId) {
+          const { community } = await communityAccess(
+            req.userId!,
+            input.communityId,
+            true,
+            session,
+          );
+          if (input.activityType !== "group" || !input.capacity)
+            throw fail(
+              400,
+              "Community plans must be group plans with a capacity.",
+            );
+          if (input.recurring)
+            throw fail(400, "Choose a specific date for this community plan.");
+          if (!input.clientId) throw fail(400, "A submission ID is required.");
+          const old = await Activity.findOne({
+            creator: req.userId,
+            communityRequestKey: input.clientId,
+          }).session(session ?? null);
+          if (old) return old;
+          await Community.updateOne(
+            { _id: community._id },
+            { $inc: { revision: 1 } },
+            { session },
+          );
+          const count = await Activity.countDocuments({
+            community: community._id,
+            creator: req.userId,
+            status: { $in: ["active", "paused"] },
+            ownerState: { $in: ["live", "paused"] },
+            startsAt: { $gt: new Date() },
+          }).session(session ?? null);
+          if (count >= community.maxActivePlans)
+            throw fail(
+              409,
+              `You can have ${community.maxActivePlans} active plans in this community. Close an existing plan first.`,
+            );
+        }
+        const [activity] = await Activity.create(
+          [
+            {
+              ...input,
+              ...audience,
+              ...(input.communityId
+                ? {
+                    community: input.communityId,
+                    communityRequestKey: input.clientId,
+                  }
+                : {}),
+              creator: req.userId,
+              status: category.moderationRequired ? "paused" : "active",
+            },
+          ],
+          { session },
+        );
+        return activity;
+      };
+      const data = input.communityId
+        ? await mongoose.connection.transaction(create)
+        : await create();
+      res.status(201).json({ data });
     },
   );
   app.patch(
@@ -361,6 +431,16 @@ export function createApp() {
         status: { $ne: "deleted" },
       });
       if (!existing) throw fail(404, "Plan not found.");
+      if (input.communityId || input.clientId)
+        throw fail(
+          400,
+          "A plan's community and submission ID cannot be changed.",
+        );
+      if (existing.community) {
+        await communityAccess(req.userId!, String(existing.community));
+        if (input.activityType === "one_on_one" || input.recurring)
+          throw fail(400, "Community plans must remain dated group plans.");
+      }
       const audience = await preparePlanAudience(input.audience, req.userId!);
       if (existing.visibility === "private")
         throw fail(
@@ -415,27 +495,69 @@ export function createApp() {
         !(await Category.exists({ slug: input.category, active: true }))
       )
         throw fail(400, "Choose an enabled category.");
-      const data = await Activity.findOneAndUpdate(
-        {
-          _id: validId(req.params.id),
-          creator: req.userId,
-          status: { $ne: "deleted" },
-        },
-        {
-          $set: {
-            ...input,
-            ...audience,
-            // Extending an expired or closed plan to a new date reopens it.
-            ...(input.startsAt &&
-            (existing.ownerState === "expired" ||
-              existing.ownerState === "closed")
-              ? { ownerState: "live" }
-              : {}),
+      const save = async (session?: mongoose.ClientSession) => {
+        if (
+          existing.community &&
+          input.startsAt &&
+          ["expired", "closed"].includes(existing.ownerState)
+        ) {
+          const { community } = await communityAccess(
+            req.userId!,
+            String(existing.community),
+            true,
+            session,
+          );
+          await Community.updateOne(
+            { _id: community._id },
+            { $inc: { revision: 1 } },
+            { session },
+          );
+          const count = await Activity.countDocuments({
+            _id: { $ne: existing._id },
+            community: community._id,
+            creator: req.userId,
+            status: { $in: ["active", "paused"] },
+            ownerState: { $in: ["live", "paused"] },
+            startsAt: { $gt: new Date() },
+          }).session(session ?? null);
+          if (count >= community.maxActivePlans)
+            throw fail(
+              409,
+              "Close another community plan before rescheduling this one.",
+            );
+        }
+        return Activity.findOneAndUpdate(
+          {
+            _id: validId(req.params.id),
+            creator: req.userId,
+            status: { $ne: "deleted" },
           },
-        },
-        { new: true, runValidators: true },
-      );
+          {
+            $set: {
+              ...input,
+              ...audience,
+              // Extending an expired or closed plan to a new date reopens it.
+              ...(input.startsAt &&
+              (existing.ownerState === "expired" ||
+                existing.ownerState === "closed")
+                ? { ownerState: "live" }
+                : {}),
+            },
+          },
+          { new: true, runValidators: true, session },
+        );
+      };
+      const data = existing.community
+        ? await mongoose.connection.transaction(save)
+        : await save();
       if (!data) throw fail(404, "Plan not found.");
+      if (existing.community && (input.startsAt || input.endsAt || input.zone))
+        await announceCommunityPlan(
+          data._id,
+          req.userId!,
+          `The time or meeting details for ${data.title} changed. Please review the plan.`,
+          `plan-change:${data._id}:${data.updatedAt.getTime()}`,
+        );
       res.json({ data });
     },
   );
@@ -448,6 +570,13 @@ export function createApp() {
         { status: "deleted" },
       );
       if (!data) throw fail(404, "Plan not found.");
+      if (data.community)
+        await announceCommunityPlan(
+          data._id,
+          req.userId!,
+          `${data.title} has been cancelled by the organiser.`,
+          `plan-deleted:${data._id}`,
+        );
       res.status(204).end();
     },
   );

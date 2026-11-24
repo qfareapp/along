@@ -7,9 +7,27 @@ import { initializePlay } from "./play-bank.js";
 import { attachPlaySockets } from "./play-sockets.js";
 import { setTimeout as delay } from "node:timers/promises";
 import { PushDevice, PushJob, startPushWorker } from "./push.js";
-import { Airport, AirportSession, AirportConnection, AirportNotice } from "./airport-models.js";
+import {
+  Airport,
+  AirportSession,
+  AirportConnection,
+  AirportNotice,
+} from "./airport-models.js";
 import { cleanupAirportVisits } from "./airports.js";
-import { cleanupDeletedAccounts, MediaDeletion, AccountDeletion } from "./account-deletion.js";
+import {
+  cleanupDeletedAccounts,
+  MediaDeletion,
+  AccountDeletion,
+} from "./account-deletion.js";
+import { seedCommunities } from "./community-seed.js";
+import { cleanupCommunities } from "./community-notifications.js";
+import {
+  Community,
+  CommunityMembership,
+  CommunityMessage,
+  CommunityReaction,
+  CommunityNotice,
+} from "./community-models.js";
 
 mongoose.set("bufferCommands", false);
 const shutdownController = new AbortController();
@@ -31,9 +49,26 @@ async function connectDatabase() {
         return;
       }
       console.log("MongoDB connected");
-      await Promise.all([PushDevice.init(), PushJob.init(), Airport.init(), AirportSession.init(), AirportConnection.init(), AirportNotice.init(), MediaDeletion.init(), AccountDeletion.init()]);
+      await Promise.all([
+        PushDevice.init(),
+        PushJob.init(),
+        Airport.init(),
+        AirportSession.init(),
+        AirportConnection.init(),
+        AirportNotice.init(),
+        MediaDeletion.init(),
+        AccountDeletion.init(),
+      ]);
       await initializeCategories();
       await initializePlay();
+      await Promise.all([
+        Community.init(),
+        CommunityMembership.init(),
+        CommunityMessage.init(),
+        CommunityReaction.init(),
+        CommunityNotice.init(),
+      ]);
+      await seedCommunities();
       return;
     } catch {
       if (shutdownController.signal.aborted) return;
@@ -59,7 +94,12 @@ let cleaningSocial = false;
 const socialCleanup = setInterval(() => {
   if (mongoose.connection.readyState === 1 && !cleaningSocial) {
     cleaningSocial = true;
-    void Promise.all([cleanupSocial(), cleanupAirportVisits(), cleanupDeletedAccounts()])
+    void Promise.all([
+      cleanupSocial(),
+      cleanupAirportVisits(),
+      cleanupDeletedAccounts(),
+      cleanupCommunities(),
+    ])
       .catch(() =>
         console.error("Social cleanup failed; retrying next minute."),
       )

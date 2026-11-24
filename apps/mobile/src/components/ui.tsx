@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -403,6 +404,111 @@ export function Field({
     </View>
   );
 }
+export type ToggleOption<T extends string> = {
+  value: T;
+  label: string;
+  icon?: IconName;
+  badge?: number;
+};
+/** Pill-shaped switch whose highlight slides between options. */
+export function SegmentedToggle<T extends string>({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: ToggleOption<T>[];
+  value: T;
+  onChange: (value: T) => void;
+  label: string;
+}) {
+  const [width, setWidth] = useState(0);
+  const index = Math.max(
+    0,
+    options.findIndex((o) => o.value === value),
+  );
+  const [slide] = useState(() => new Animated.Value(index));
+  useEffect(() => {
+    Animated.spring(slide, {
+      toValue: index,
+      friction: 9,
+      tension: 90,
+      useNativeDriver: Platform.OS !== "web",
+    }).start();
+  }, [index, slide]);
+  const segment = width ? (width - 8) / options.length : 0;
+  return (
+    <View
+      accessibilityRole="tablist"
+      accessibilityLabel={label}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      style={s.toggle}
+    >
+      {!!segment && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            s.toggleThumb,
+            {
+              width: segment,
+              transform: [
+                {
+                  translateX: slide.interpolate({
+                    inputRange: [0, Math.max(1, options.length - 1)],
+                    outputRange: [0, segment * Math.max(1, options.length - 1)],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
+      )}
+      {options.map((o) => {
+        const active = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={
+              o.badge ? `${o.label}, ${o.badge} unread` : o.label
+            }
+            onPress={() => onChange(o.value)}
+            style={s.toggleOption}
+          >
+            {o.icon && (
+              <Ionicons
+                name={o.icon}
+                size={16}
+                color={active ? c.white : c.teal}
+              />
+            )}
+            <Text
+              numberOfLines={1}
+              style={[s.toggleText, active && { color: c.white }]}
+            >
+              {o.label}
+            </Text>
+            {!!o.badge && (
+              <View
+                style={[s.toggleBadge, active && { backgroundColor: c.white }]}
+              >
+                <Text
+                  style={[
+                    s.toggleBadgeText,
+                    active && { color: c.coralBright },
+                  ]}
+                >
+                  {o.badge > 99 ? "99+" : o.badge}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
 export function Notice({ children }: { children: ReactNode }) {
   return (
     <View style={s.notice}>
@@ -538,6 +644,47 @@ const s = StyleSheet.create({
     backgroundColor: "#FFFBF7",
     fontSize: 14,
   },
+  toggle: {
+    flexDirection: "row",
+    padding: 4,
+    borderRadius: 18,
+    backgroundColor: "#F6E9DE",
+    borderWidth: 1,
+    borderColor: "#EFE3D8",
+  },
+  toggleThumb: {
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    left: 4,
+    borderRadius: 14,
+    backgroundColor: c.teal,
+    shadowColor: c.tealDark,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  toggleOption: {
+    flex: 1,
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 8,
+  },
+  toggleText: { fontSize: 14, fontWeight: "600", color: c.teal },
+  toggleBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: c.coralBright,
+  },
+  toggleBadgeText: { color: c.white, fontSize: 11, fontWeight: "700" },
   notice: {
     flexDirection: "row",
     gap: 8,

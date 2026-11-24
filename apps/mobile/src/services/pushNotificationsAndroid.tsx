@@ -30,7 +30,10 @@ Notifications.setNotificationHandler({
         foreground.id === data.conversationId) ||
       (data.kind === "group" &&
         foreground.path === "/plan-group" &&
-        foreground.id === data.groupId);
+        foreground.id === data.groupId) ||
+      (data.kind === "community" &&
+        foreground.path === "/community" &&
+        foreground.id === data.communityId);
     const show =
       !!foreground.userId &&
       data.recipientId === foreground.userId &&
@@ -214,6 +217,10 @@ export function PushNotifications() {
       router.push(`/conversation?id=${data.conversationId}`);
     else if (data.kind === "group" && validId(data.groupId))
       router.push(`/plan-group?id=${data.groupId}`);
+    else if (data.kind === "community" && validId(data.communityId))
+      router.push(`/community?id=${data.communityId}`);
+    else if (data.kind === "notice" && validId(data.communityId))
+      router.push("/community-updates");
     else router.push("/notifications");
   }, [response, userId, navigation?.key]);
   return null;

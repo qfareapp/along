@@ -38,6 +38,7 @@ import { localDate } from "../components/dateTime";
 import { PlanStatusControl, type OwnerPlanState } from "./PlanStatusControl";
 import { formatSchedule } from "./PlanSchedule";
 import { PlanGroupEntry } from "./PlanGroupEntry";
+import { CommunityPlanActions } from "./CommunityPlanActions";
 
 type IconName = React.ComponentProps<typeof Ionicons>["name"];
 const GUTTER = 20;
@@ -74,6 +75,7 @@ export default function LiveActivityDetail() {
     try {
       await action();
       await refresh();
+      await query.refetch();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Please try again.");
     } finally {
@@ -717,85 +719,92 @@ export default function LiveActivityDetail() {
             {error}
           </Text>
         )}
-        {!plan.isOwner && plan.interestStatus === "pending" && (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 6,
-            }}
-          >
-            <Ionicons name="time-outline" size={14} color={c.muted} />
-            <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
-              The organizer was notified and can accept and message you first.
-            </Text>
-          </View>
-        )}
-        <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
-          {canSave && (
-            <IconButton
-              icon={plan.saved ? "bookmark" : "bookmark-outline"}
-              label={plan.saved ? "Unsave plan" : "Save plan"}
-              color={plan.saved ? c.coralBright : c.teal}
-              onPress={() => {
-                if (!busy) void act(() => save(plan));
-              }}
+        {!plan.communityId &&
+          !plan.isOwner &&
+          plan.interestStatus === "pending" && (
+            <View
               style={{
-                width: 52,
-                height: 52,
-                borderRadius: 16,
-                backgroundColor: c.soft,
-                borderWidth: 1,
-                borderColor: c.line,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
               }}
-            />
+            >
+              <Ionicons name="time-outline" size={14} color={c.muted} />
+              <Text style={[text.muted, { fontSize: 12, lineHeight: 16 }]}>
+                The organizer was notified and can accept and message you first.
+              </Text>
+            </View>
           )}
-          <View style={{ flex: 1 }}>
-            <Button
-              variant="coral"
-              icon={requestIcon}
-              loading={busy}
-              disabled={
-                plan.privatePlan
-                  ? !plan.conversationId
-                  : (plan.isOwner &&
-                      (plan.ownerState === "successful" ||
-                        plan.publicationStatus === "paused")) ||
-                    (!plan.isOwner &&
-                      (plan.interestStatus === "pending" ||
-                        plan.interestStatus === "declined" ||
-                        (plan.availability === "full" &&
-                          plan.interestStatus !== "accepted")))
-              }
-              onPress={() =>
-                plan.privatePlan
-                  ? plan.conversationId &&
-                    router.push(`/conversation?id=${plan.conversationId}`)
-                  : plan.isOwner
-                    ? ended
-                      ? setReschedule(!reschedule)
-                      : plan.ownerState === "paused"
-                        ? void act(() =>
-                            api(`/activities/${plan._id}/state`, {
-                              method: "PATCH",
-                              body: JSON.stringify({ state: "live" }),
+        {plan.communityId ? (
+          <CommunityPlanActions plan={plan} />
+        ) : (
+          <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+            {canSave && (
+              <IconButton
+                icon={plan.saved ? "bookmark" : "bookmark-outline"}
+                label={plan.saved ? "Unsave plan" : "Save plan"}
+                color={plan.saved ? c.coralBright : c.teal}
+                onPress={() => {
+                  if (!busy) void act(() => save(plan));
+                }}
+                style={{
+                  width: 52,
+                  height: 52,
+                  borderRadius: 16,
+                  backgroundColor: c.soft,
+                  borderWidth: 1,
+                  borderColor: c.line,
+                }}
+              />
+            )}
+            <View style={{ flex: 1 }}>
+              <Button
+                variant="coral"
+                icon={requestIcon}
+                loading={busy}
+                disabled={
+                  plan.privatePlan
+                    ? !plan.conversationId
+                    : (plan.isOwner &&
+                        (plan.ownerState === "successful" ||
+                          plan.publicationStatus === "paused")) ||
+                      (!plan.isOwner &&
+                        (plan.interestStatus === "pending" ||
+                          plan.interestStatus === "declined" ||
+                          (plan.availability === "full" &&
+                            plan.interestStatus !== "accepted")))
+                }
+                onPress={() =>
+                  plan.privatePlan
+                    ? plan.conversationId &&
+                      router.push(`/conversation?id=${plan.conversationId}`)
+                    : plan.isOwner
+                      ? ended
+                        ? setReschedule(!reschedule)
+                        : plan.ownerState === "paused"
+                          ? void act(() =>
+                              api(`/activities/${plan._id}/state`, {
+                                method: "PATCH",
+                                body: JSON.stringify({ state: "live" }),
+                              }),
+                            )
+                          : router.push("/notifications")
+                      : plan.interestStatus === "accepted" &&
+                          plan.conversationId
+                        ? router.push(`/conversation?id=${plan.conversationId}`)
+                        : void act(() =>
+                            api(`/activities/${plan._id}/interests`, {
+                              method: "POST",
                             }),
                           )
-                        : router.push("/notifications")
-                    : plan.interestStatus === "accepted" && plan.conversationId
-                      ? router.push(`/conversation?id=${plan.conversationId}`)
-                      : void act(() =>
-                          api(`/activities/${plan._id}/interests`, {
-                            method: "POST",
-                          }),
-                        )
-              }
-            >
-              {requestLabel}
-            </Button>
+                }
+              >
+                {requestLabel}
+              </Button>
+            </View>
           </View>
-        </View>
+        )}
       </View>
     </Screen>
   );

@@ -27,6 +27,7 @@ const membership = new Schema(
     joinedAfter: { type: Number, required: true, default: 0 },
     lastReadSequence: { type: Number, required: true, default: 0 },
     removedAt: { type: Date, default: null },
+    muted: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
@@ -45,6 +46,9 @@ const message = new Schema(
       default: "message",
     },
     clientId: { type: String, maxlength: 80 },
+    replyTo: { type: Schema.Types.ObjectId, ref: "PlanGroupMessage" },
+    pinnedAt: Date,
+    deletedAt: Date,
   },
   { timestamps: true },
 );
@@ -57,3 +61,13 @@ message.index(
   },
 );
 export const PlanGroupMessage = mongoose.model("PlanGroupMessage", message);
+const reaction = new Schema(
+  {
+    message: ref("PlanGroupMessage"),
+    user: ref("User"),
+    emoji: { type: String, required: true, maxlength: 16 },
+  },
+  { timestamps: true },
+);
+reaction.index({ message: 1, user: 1 }, { unique: true });
+export const PlanGroupReaction = mongoose.model("PlanGroupReaction", reaction);

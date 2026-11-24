@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { verifyMemberToken } from "./auth.js";
 import { completion } from "./onboarding.js";
 import { chatEvents } from "./chat-events.js";
+import { attachCommunitySockets } from "./community-sockets.js";
 import { getPlayState, mutatePlay, setPlayPublisher } from "./play.js";
 
 export function attachPlaySockets(server: HttpServer) {
@@ -32,6 +33,7 @@ export function attachPlaySockets(server: HttpServer) {
     },
     maxHttpBufferSize: 8192,
   });
+  const closeCommunities = attachCommunitySockets(io);
   const play = io.of("/play");
   play.use(async (socket, next) => {
     try {
@@ -171,6 +173,7 @@ export function attachPlaySockets(server: HttpServer) {
   return {
     io,
     close: async () => {
+      closeCommunities();
       clearInterval(recheck);
       chatEvents.off("changed", chatChanged);
       setPlayPublisher(async () => {});

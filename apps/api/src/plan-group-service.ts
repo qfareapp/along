@@ -4,9 +4,11 @@ import {
   PlanGroup,
   PlanGroupMember,
   PlanGroupMessage,
+  PlanGroupReaction,
 } from "./plan-group-models.js";
 import { fail } from "./onboarding.js";
 import { enqueuePush } from "./push.js";
+import { Community, CommunityMembership } from "./community-models.js";
 
 export const groupId = (value: unknown) => {
   if (typeof value !== "string" || !mongoose.isObjectIdOrHexString(value))
@@ -55,6 +57,28 @@ export async function authorisePlanGroup(
     : null;
   if (!group || !activity || !member)
     throw fail(404, "Group chat unavailable.");
+  if (activity.community) {
+    if (session)
+      await Community.updateOne(
+        { _id: activity.community },
+        { $inc: { revision: 1 } },
+        { session },
+      );
+    if (
+      !(await Community.exists({
+        _id: activity.community,
+        status: "active",
+        visibility: "public",
+      }).session(session ?? null)) ||
+      ["closed", "expired"].includes(activity.ownerState) ||
+      (await CommunityMembership.exists({
+        community: activity.community,
+        user: { $in: [userId, activity.creator] },
+        status: { $in: ["banned", "suspended"] },
+      }).session(session ?? null))
+    )
+      throw fail(404, "Group chat unavailable.");
+  }
   const members = await selectedGroupUsers(activity, session);
   if (
     !members.some((u) => String(u._id) === userId) ||
@@ -62,8 +86,14 @@ export async function authorisePlanGroup(
   )
     throw fail(404, "Group chat unavailable.");
   const organiserId = String(activity.creator);
-  const viewerBlocks = await Block.find({ $or: [{ user: userId }, { target: userId }] }).session(session ?? null).lean();
-  const hiddenSenders = viewerBlocks.map(b => String(String(b.user) === userId ? b.target : b.user));
+  const viewerBlocks = await Block.find({
+    $or: [{ user: userId }, { target: userId }],
+  })
+    .session(session ?? null)
+    .lean();
+  const hiddenSenders = viewerBlocks.map((b) =>
+    String(String(b.user) === userId ? b.target : b.user),
+  );
   const blocked = await Block.exists({
     $or: [
       { user: userId, target: organiserId },
@@ -97,11 +127,14 @@ export async function authorisePlanGroup(
     group,
     activity,
     member,
-    members: roster.filter(u => !hiddenSenders.includes(String(u._id))),
+    members: roster.filter((u) => !hiddenSenders.includes(String(u._id))),
     hiddenSenders,
     organiserId,
     isOrganiser,
     canSend:
+      (!activity.community ||
+        (activity.ownerState === "live" &&
+          new Date(activity.endsAt ?? activity.startsAt) > new Date())) &&
       !me.restrictions?.messaging &&
       (isOrganiser || group.messagingMode === "everyone"),
   };
@@ -117,6 +150,8 @@ export function groupMessageDto(
     id: String(message._id),
     sequence: message.sequence,
     text: message.text,
+    deleted: !!message.deletedAt,
+    pinned: !!message.pinnedAt,
     kind: message.kind,
     own: senderId === userId,
     createdAt: message.createdAt,
@@ -136,6 +171,7 @@ export async function appendGroupMessage(
   kind: "message" | "created" | "joined" | "permissions" | "removed",
   session: mongoose.ClientSession,
   clientId?: string,
+  replyTo?: string,
 ) {
   const updated = await PlanGroup.findOneAndUpdate(
     { _id: group._id },
@@ -152,6 +188,7 @@ export async function appendGroupMessage(
         kind,
         sequence: updated.lastSequence,
         ...(clientId ? { clientId } : {}),
+        ...(replyTo ? { replyTo } : {}),
       },
     ],
     { session },
@@ -162,18 +199,66 @@ export async function appendGroupMessage(
     user: { $ne: sender },
   }).session(session);
   for (const member of recipients)
-    await enqueuePush(
-      {
-        key: `group:${message!._id}`,
-        user: String(member.user),
-        actor: sender,
-        kind: kind === "message" ? "group" : "notice",
-        target: String(group._id),
-        message: String(message!._id),
-      },
-      session,
-    );
+    if (!member.muted)
+      await enqueuePush(
+        {
+          key: `group:${message!._id}`,
+          user: String(member.user),
+          actor: sender,
+          kind: kind === "message" ? "group" : "notice",
+          target: String(group._id),
+          message: String(message!._id),
+        },
+        session,
+      );
   return message!;
+}
+export async function decorateGroupMessages(
+  messages: InstanceType<typeof PlanGroupMessage>[],
+  userId: string,
+  access: GroupAccess,
+) {
+  const reactions = await PlanGroupReaction.find({
+    message: { $in: messages.map((m) => m._id) },
+    user: { $nin: access.hiddenSenders },
+  }).lean();
+  const replies = await PlanGroupMessage.find({
+    _id: { $in: messages.flatMap((m) => (m.replyTo ? [m.replyTo] : [])) },
+    group: access.group._id,
+    sender: { $nin: access.hiddenSenders },
+    sequence: { $gt: access.member.joinedAfter },
+    deletedAt: null,
+  }).lean();
+  return messages.map((m) => ({
+    ...groupMessageDto(m, userId, access),
+    reply: (() => {
+      const r = replies.find((r) => String(r._id) === String(m.replyTo));
+      return r
+        ? {
+            name:
+              access.members.find((u) => String(u._id) === String(r.sender))
+                ?.name ?? "Former member",
+            text: r.text.slice(0, 150),
+          }
+        : null;
+    })(),
+    reactions: m.deletedAt
+      ? []
+      : ["❤️", "👍", "😂", "🎉", "🔥"]
+          .map((emoji) => ({
+            emoji,
+            count: reactions.filter(
+              (r) => String(r.message) === String(m._id) && r.emoji === emoji,
+            ).length,
+            own: reactions.some(
+              (r) =>
+                String(r.message) === String(m._id) &&
+                String(r.user) === userId &&
+                r.emoji === emoji,
+            ),
+          }))
+          .filter((r) => r.count),
+  }));
 }
 /** Called in the existing acceptance transaction. A new attendee sees join/future messages, not earlier history. */
 export async function addAcceptedGroupMember(
@@ -185,13 +270,25 @@ export async function addAcceptedGroupMember(
   const group = await PlanGroup.findOne({ activity: activityId }).session(
     session,
   );
-  if (
-    !group ||
-    (await PlanGroupMember.exists({ group: group._id, user: userId }).session(
-      session,
-    ))
-  )
+  if (!group) return;
+  const oldMember = await PlanGroupMember.findOne({
+    group: group._id,
+    user: userId,
+  }).session(session);
+  if (oldMember && !oldMember.removedAt) return;
+  if (oldMember) {
+    const communityPlan = await Activity.exists({
+      _id: activityId,
+      community: { $ne: null },
+      participants: userId,
+    }).session(session);
+    if (!communityPlan) return;
+    oldMember.removedAt = null;
+    oldMember.joinedAfter = group.lastSequence;
+    oldMember.lastReadSequence = group.lastSequence;
+    await oldMember.save({ session });
     return;
+  }
   const user = await User.findById(userId)
     .select("name")
     .session(session)

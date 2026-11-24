@@ -38,6 +38,8 @@ await Promise.all([
 ]);
 await initializePlay();
 await seedCategories();
+const { seedCommunities } = await import("./community-seed.js");
+await seedCommunities();
 const members: string[] = [];
 for (const [i, name] of ["QA Alice", "QA Bob"].entries()) {
   const user = await User.create({

@@ -5,11 +5,12 @@ import { rateLimit } from "express-rate-limit";
 import { z } from "zod";
 import { authenticate, type AuthedRequest } from "./auth.js";
 import { fail, requireReady } from "./onboarding.js";
-import { Activity, Block } from "./models.js";
+import { Activity, ActivityInterest, Block } from "./models.js";
 import {
   PlanGroup,
   PlanGroupMember,
   PlanGroupMessage,
+  PlanGroupReaction,
 } from "./plan-group-models.js";
 import {
   appendGroupMessage,
@@ -18,7 +19,9 @@ import {
   groupMessageDto,
   selectedGroupUsers,
   type GroupAccess,
+  decorateGroupMessages,
 } from "./plan-group-service.js";
+import { communityEvents } from "./community-service.js";
 
 async function summary(access: GroupAccess, userId: string) {
   const { group, activity, member } = access;
@@ -36,12 +39,23 @@ async function summary(access: GroupAccess, userId: string) {
   ]);
   return {
     id: String(group._id),
-    visibilityKey: crypto.createHash("sha256").update(JSON.stringify([access.hiddenSenders.slice().sort(), access.members.map(u => String(u._id)).sort(), member.joinedAfter, group.contentRevision ?? 0])).digest("hex"),
+    visibilityKey: crypto
+      .createHash("sha256")
+      .update(
+        JSON.stringify([
+          access.hiddenSenders.slice().sort(),
+          access.members.map((u) => String(u._id)).sort(),
+          member.joinedAfter,
+          group.contentRevision ?? 0,
+        ]),
+      )
+      .digest("hex"),
     activityId: String(activity._id),
     title: activity.title,
     messagingMode: group.messagingMode,
     isOrganiser: access.isOrganiser,
     canSend: access.canSend,
+    muted: member.muted,
     memberCount: access.members.length,
     lastSequence: group.lastSequence,
     lastReadSequence: member.lastReadSequence,
@@ -56,6 +70,15 @@ async function summary(access: GroupAccess, userId: string) {
 export function planGroupsRouter() {
   const router = Router();
   router.use(authenticate, requireReady);
+  router.use((req, res, next) => {
+    if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
+      res.on("finish", () => {
+        const id = req.path.split("/")[1];
+        if (res.statusCode < 400 && mongoose.isObjectIdOrHexString(id))
+          communityEvents.emit("group-changed", id);
+      });
+    next();
+  });
   router.use((_req, res, next) => {
     res.set("Cache-Control", "private, no-store");
     next();
@@ -234,13 +257,84 @@ export function planGroupsRouter() {
           name: user.name,
           isOrganiser: String(user._id) === access.organiserId,
         })),
-        messages: messages.map((message) =>
-          groupMessageDto(message, req.userId!, access),
-        ),
+        messages: await decorateGroupMessages(messages, req.userId!, access),
         nextBefore: hasMore ? messages[0]!.sequence : null,
       },
     });
   });
+  router.patch("/:id/preferences", write, async (req: AuthedRequest, res) => {
+    const access = await authorisePlanGroup(req.userId!, req.params.id);
+    const { muted } = z.object({ muted: z.boolean() }).strict().parse(req.body);
+    await PlanGroupMember.updateOne({ _id: access.member._id }, { muted });
+    res.json({ data: { muted } });
+  });
+  router.post(
+    "/:id/messages/:messageId/action",
+    write,
+    async (req: AuthedRequest, res) => {
+      const input = z
+        .object({
+          action: z.enum(["react", "pin", "delete"]),
+          emoji: z.enum(["❤️", "👍", "😂", "🎉", "🔥"]).nullable().optional(),
+          pinned: z.boolean().optional(),
+        })
+        .strict()
+        .parse(req.body);
+      await mongoose.connection.transaction(async (session) => {
+        const access = await authorisePlanGroup(
+          req.userId!,
+          req.params.id,
+          session,
+        );
+        const message = await PlanGroupMessage.findOne({
+          _id: groupId(req.params.messageId),
+          group: access.group._id,
+          sender: { $nin: access.hiddenSenders },
+          sequence: { $gt: access.member.joinedAfter },
+          kind: "message",
+          deletedAt: null,
+        }).session(session);
+        if (!message) throw fail(404, "Message unavailable.");
+        if (input.action === "react") {
+          if (input.emoji)
+            await PlanGroupReaction.updateOne(
+              { message: message._id, user: req.userId },
+              { emoji: input.emoji },
+              { upsert: true, session },
+            );
+          else
+            await PlanGroupReaction.deleteOne(
+              { message: message._id, user: req.userId },
+              { session },
+            );
+        } else {
+          if (
+            !access.isOrganiser &&
+            (input.action === "pin" || String(message.sender) !== req.userId)
+          )
+            throw fail(403, "You cannot change this message.");
+          if (input.action === "pin")
+            message.pinnedAt = input.pinned ? new Date() : undefined;
+          else {
+            message.text = "Message removed";
+            message.deletedAt = new Date();
+            message.pinnedAt = undefined;
+            await PlanGroupReaction.deleteMany(
+              { message: message._id },
+              { session },
+            );
+          }
+          await message.save({ session });
+        }
+        await PlanGroup.updateOne(
+          { _id: access.group._id },
+          { $inc: { contentRevision: 1 } },
+          { session },
+        );
+      });
+      res.json({ data: { ok: true } });
+    },
+  );
   router.patch("/:id/settings", write, async (req: AuthedRequest, res) => {
     const { messagingMode } = z
       .object({ messagingMode: z.enum(["everyone", "organiser_only"]) })
@@ -300,6 +394,21 @@ export function planGroupsRouter() {
         if (member.removedAt) return;
         member.removedAt = new Date();
         await member.save({ session });
+        if (access.activity.community) {
+          await Activity.updateOne(
+            { _id: access.activity._id },
+            {
+              $pull: { participants: targetId },
+              $inc: { groupChatRevision: 1 },
+            },
+            { session },
+          );
+          await ActivityInterest.updateOne(
+            { activity: access.activity._id, user: targetId },
+            { status: "declined" },
+            { session },
+          );
+        }
         const name = access.members.find(
           (user) => String(user._id) === String(targetId),
         )?.name;
@@ -319,6 +428,7 @@ export function planGroupsRouter() {
       .object({
         text: z.string().trim().min(1).max(2000),
         clientId: z.string().regex(/^[a-zA-Z0-9_-]{8,80}$/),
+        replyTo: z.string().optional(),
       })
       .strict()
       .parse(req.body);
@@ -347,6 +457,17 @@ export function planGroupsRouter() {
             ? "Only the organiser can send messages in this group."
             : "Messaging is restricted. Contact support to appeal.",
         );
+      if (
+        input.replyTo &&
+        !(await PlanGroupMessage.exists({
+          _id: groupId(input.replyTo),
+          group: access.group._id,
+          sender: { $nin: access.hiddenSenders },
+          sequence: { $gt: access.member.joinedAfter },
+          deletedAt: null,
+        }).session(session))
+      )
+        throw fail(404, "Original message unavailable.");
       const message = await appendGroupMessage(
         access.group,
         req.userId!,
@@ -354,6 +475,7 @@ export function planGroupsRouter() {
         "message",
         session,
         input.clientId,
+        input.replyTo,
       );
       messageId = String(message._id);
     });

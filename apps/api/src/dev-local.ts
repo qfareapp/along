@@ -15,6 +15,8 @@ const { seedCategories } = await import("./categories.js");
 const { User, Profile, Activity } = await import("./models.js");
 await mongoose.connect(database.getUri());
 await seedCategories();
+const { seedCommunities } = await import("./community-seed.js");
+await seedCommunities();
 const user = await User.create({
   email: "preview@example.test",
   name: "Preview Member",

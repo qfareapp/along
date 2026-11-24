@@ -46,82 +46,141 @@ import {
   type PlanGroupThread,
 } from "../services/planGroups";
 import { colors as c } from "../theme";
+import { GroupMessageTools } from "./GroupMessageTools";
 
 export function PlanGroupList() {
   const query = usePlanGroups();
+  if (query.isPending && query.fetchStatus !== "idle")
+    return <ActivityIndicator color={c.teal} style={{ marginTop: 24 }} />;
+  if (query.isError)
+    return (
+      <Empty
+        icon="people-outline"
+        title="Couldn't load plan groups"
+        description="Check your connection and try again."
+      >
+        <Button onPress={() => void query.refetch()}>Try Again</Button>
+      </Empty>
+    );
+  if (!query.data?.length)
+    return (
+      <Empty
+        icon="people-outline"
+        title="No plan groups yet"
+        description="When you host a plan or your request to join one is accepted, its group chat appears here."
+      >
+        <Button onPress={() => router.push("/(tabs)/plans")}>
+          Browse Plans
+        </Button>
+      </Empty>
+    );
   return (
-    <View style={{ gap: 10 }}>
-      {query.isPending && query.fetchStatus !== "idle" && (
-        <ActivityIndicator color={c.teal} />
-      )}
-      {query.isError && (
-        <>
-          <Notice>Could not load plan group chats.</Notice>
-          <Button variant="outline" onPress={() => void query.refetch()}>
-            Retry group chats
-          </Button>
-        </>
-      )}
-      {!!query.data?.length && (
-        <Text style={[text.label, { marginTop: 10 }]}>Plan groups</Text>
-      )}
-      {query.data?.map((group) => (
-        <Pressable
-          key={group.id}
-          accessibilityRole="button"
-          accessibilityLabel={`Group chat: ${group.title}${group.unread ? `, ${group.unread} unread` : ""}`}
-          onPress={() => router.push(`/plan-group?id=${group.id}`)}
-          style={[
-            card,
-            {
-              padding: 16,
-              flexDirection: "row",
-              gap: 12,
-              alignItems: "center",
-            },
-          ]}
-        >
-          <View
-            style={{
-              backgroundColor: "#DDECE8",
-              width: 48,
-              height: 48,
-              borderRadius: 16,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+    <View style={{ gap: 12 }}>
+      {query.data.map((group) => {
+        const unread = group.unread > 0;
+        return (
+          <Pressable
+            key={group.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Group chat: ${group.title}${unread ? `, ${group.unread} unread` : ""}`}
+            onPress={() => router.push(`/plan-group?id=${group.id}`)}
+            style={({ pressed }) => [
+              card,
+              {
+                padding: 14,
+                flexDirection: "row",
+                gap: 12,
+                alignItems: "center",
+              },
+              unread && { borderColor: "#F7B9A8" },
+              pressed && { opacity: 0.75 },
+            ]}
           >
-            <Ionicons name="people" size={24} color={c.teal} />
-          </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Text style={text.label} numberOfLines={1}>
-              {group.title}
-            </Text>
-            <Text style={text.muted} numberOfLines={1}>
-              {group.lastMessage?.text ?? `${group.memberCount} members`}
-            </Text>
-            <Text style={[text.muted, { fontSize: 11 }]}>
-              {group.memberCount} members
-              {group.messagingMode === "organiser_only"
-                ? " · Announcements"
-                : ""}
-            </Text>
-          </View>
-          {!!group.unread && (
             <View
               style={{
-                padding: 7,
-                borderRadius: 14,
-                backgroundColor: c.coralBright,
+                backgroundColor: "#DDECE8",
+                width: 52,
+                height: 52,
+                borderRadius: 18,
+                alignItems: "center",
+                justifyContent: "center",
               }}
             >
-              <Text style={{ color: c.white, fontWeight: "700" }}>
-                {group.unread > 99 ? "99+" : group.unread}
+              <Ionicons
+                name={
+                  group.messagingMode === "organiser_only"
+                    ? "megaphone"
+                    : "people"
+                }
+                size={24}
+                color={c.teal}
+              />
+            </View>
+            <View style={{ flex: 1, gap: 3 }}>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Text style={[text.label, { flex: 1 }]} numberOfLines={1}>
+                  {group.title}
+                </Text>
+                {group.lastMessage?.createdAt && (
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      color: unread ? c.coralBright : c.muted,
+                    }}
+                  >
+                    {formatChatTime(group.lastMessage.createdAt)}
+                  </Text>
+                )}
+              </View>
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+              >
+                <Text
+                  style={[
+                    text.muted,
+                    { flex: 1 },
+                    unread && { color: c.charcoal, fontWeight: "600" },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {group.lastMessage?.text ?? "No messages yet"}
+                </Text>
+                {unread && (
+                  <View
+                    style={{
+                      minWidth: 22,
+                      height: 22,
+                      paddingHorizontal: 6,
+                      borderRadius: 11,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: c.coralBright,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: c.white,
+                        fontWeight: "700",
+                        fontSize: 11,
+                      }}
+                    >
+                      {group.unread > 99 ? "99+" : group.unread}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[text.muted, { fontSize: 11 }]}>
+                {group.memberCount} members
+                {group.messagingMode === "organiser_only"
+                  ? " · Announcements only"
+                  : ""}
               </Text>
             </View>
-          )}
-        </Pressable>
-      ))}
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -144,6 +203,7 @@ export default function PlanGroupChat() {
   const query = usePlanGroupThread(id, active);
   const client = useQueryClient();
   const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState<GroupMessage | null>(null);
   const [sending, setSending] = useState(false),
     [settingsBusy, setSettingsBusy] = useState(false);
   const [error, setError] = useState(""),
@@ -158,14 +218,19 @@ export default function PlanGroupChat() {
     id: string;
     name: string;
   } | null>(null);
-  const pending = useRef<{ text: string; clientId: string } | null>(null);
+  const pending = useRef<{
+    text: string;
+    clientId: string;
+    replyTo?: string;
+  } | null>(null);
   const lastMarked = useRef(0);
   const scroll = useRef<ScrollViewInstance>(null);
   const atBottom = useRef(true);
   const insets = useSafeAreaInsets(),
     keyboard = useKeyboardVisible();
   const data = query.data;
-  const visibleOlder = older?.visibilityKey === data?.visibilityKey ? older : null;
+  const visibleOlder =
+    older?.visibilityKey === data?.visibilityKey ? older : null;
   const messages = useMemo(
     () =>
       [
@@ -206,9 +271,13 @@ export default function PlanGroupChat() {
     const body = draft.trim();
     setSending(true);
     setError("");
-    if (pending.current?.text !== body)
+    if (
+      pending.current?.text !== body ||
+      pending.current?.replyTo !== replyTo?.id
+    )
       pending.current = {
         text: body,
+        ...(replyTo ? { replyTo: replyTo.id } : {}),
         clientId: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`,
       };
     try {
@@ -218,6 +287,7 @@ export default function PlanGroupChat() {
       });
       setDraft((current) => (current.trim() === body ? "" : current));
       pending.current = null;
+      setReplyTo(null);
       atBottom.current = true;
       await query.refetch();
       void client.invalidateQueries({ queryKey: ["plan-groups"] });
@@ -281,7 +351,12 @@ export default function PlanGroupChat() {
         `/plan-groups/${id}?before=${before}`,
       );
       setOlder((current) => ({
-        messages: [...page.messages, ...(current?.visibilityKey === page.visibilityKey ? current?.messages ?? [] : [])],
+        messages: [
+          ...page.messages,
+          ...(current?.visibilityKey === page.visibilityKey
+            ? (current?.messages ?? [])
+            : []),
+        ],
         nextBefore: page.nextBefore,
         visibilityKey: page.visibilityKey,
       }));
@@ -343,7 +418,7 @@ export default function PlanGroupChat() {
             onPress={() =>
               router.canGoBack()
                 ? router.back()
-                : router.replace("/(tabs)/chat")
+                : router.replace("/(tabs)/chat?view=groups")
             }
           />
           <View style={{ flex: 1 }}>
@@ -359,6 +434,26 @@ export default function PlanGroupChat() {
             icon="people-outline"
             label="Group members and settings"
             onPress={() => setSettings(!settings)}
+          />
+          <IconButton
+            icon={
+              data.muted ? "notifications-off-outline" : "notifications-outline"
+            }
+            label={data.muted ? "Unmute event chat" : "Mute event chat"}
+            onPress={() => {
+              void api(`/plan-groups/${id}/preferences`, {
+                method: "PATCH",
+                body: JSON.stringify({ muted: !data.muted }),
+              })
+                .then(() => query.refetch())
+                .catch((e) =>
+                  setError(
+                    e instanceof Error
+                      ? e.message
+                      : "Could not change notification settings.",
+                  ),
+                );
+            }}
           />
         </View>
         {settings && (
@@ -378,7 +473,20 @@ export default function PlanGroupChat() {
                   }}
                 >
                   <Text style={[text.body, { flex: 1 }]}>{member.name}</Text>
-                  {!member.own && <Pressable accessibilityRole="button" accessibilityLabel={`Report or block ${member.name}`} onPress={() => router.push(`/safety?target=${member.id}&group=${data.id}`)} style={{ paddingVertical: 12 }}><Text style={{ color: c.teal }}>Safety</Text></Pressable>}
+                  {!member.own && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Report or block ${member.name}`}
+                      onPress={() =>
+                        router.push(
+                          `/safety?target=${member.id}&group=${data.id}`,
+                        )
+                      }
+                      style={{ paddingVertical: 12 }}
+                    >
+                      <Text style={{ color: c.teal }}>Safety</Text>
+                    </Pressable>
+                  )}
                   {member.isOrganiser && (
                     <Text style={{ color: c.teal, fontWeight: "700" }}>
                       Organiser · Admin
@@ -502,7 +610,8 @@ export default function PlanGroupChat() {
           }}
           contentContainerStyle={{ padding: 18, gap: 12, flexGrow: 1 }}
         >
-          {(visibleOlder ? visibleOlder.nextBefore : data.nextBefore) != null && (
+          {(visibleOlder ? visibleOlder.nextBefore : data.nextBefore) !=
+            null && (
             <Button
               variant="outline"
               loading={loadingOlder}
@@ -554,6 +663,10 @@ export default function PlanGroupChat() {
                       { color: message.own ? c.white : c.charcoal },
                     ]}
                   >
+                    {message.pinned ? "Pinned announcement\n" : ""}
+                    {message.reply
+                      ? `${message.reply.name}: ${message.reply.text}\n\n`
+                      : ""}
                     {message.text}
                   </Text>
                 </View>
@@ -568,7 +681,28 @@ export default function PlanGroupChat() {
                 >
                   {formatChatTime(message.createdAt)}
                 </Text>
-                {!message.own && <Pressable accessibilityRole="button" accessibilityLabel={`Report message from ${message.sender.name}`} onPress={() => router.push(`/safety?target=${message.sender.id}&group=${data.id}&groupMessage=${message.id}`)} style={{ paddingVertical: 8 }}><Text style={[text.muted, { fontSize: 11 }]}>Report message</Text></Pressable>}
+                <GroupMessageTools
+                  groupId={id}
+                  message={message}
+                  organiser={data.isOrganiser}
+                  onReply={() => setReplyTo(message)}
+                />
+                {!message.own && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Report message from ${message.sender.name}`}
+                    onPress={() =>
+                      router.push(
+                        `/safety?target=${message.sender.id}&group=${data.id}&groupMessage=${message.id}`,
+                      )
+                    }
+                    style={{ paddingVertical: 8 }}
+                  >
+                    <Text style={[text.muted, { fontSize: 11 }]}>
+                      Report message
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             ),
           )}
@@ -586,6 +720,19 @@ export default function PlanGroupChat() {
             borderTopColor: c.line,
           }}
         >
+          {replyTo && (
+            <View style={{ padding: 10, gap: 5 }}>
+              <Text style={text.label}>Reply to {replyTo.sender.name}</Text>
+              <Text style={text.muted} numberOfLines={1}>
+                {replyTo.text}
+              </Text>
+              <IconButton
+                icon="close"
+                label="Cancel reply"
+                onPress={() => setReplyTo(null)}
+              />
+            </View>
+          )}
           {data.canSend ? (
             <View
               style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}

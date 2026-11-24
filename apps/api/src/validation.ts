@@ -86,6 +86,15 @@ export const activityInput = z.object({
     .nullable()
     .optional(),
   activityType: z.enum(["one_on_one", "group"]).optional(),
+  communityId: z
+    .string()
+    .regex(/^[a-f\d]{24}$/i)
+    .optional(),
+  participationPolicy: z.enum(["approval", "open"]).optional(),
+  clientId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{8,100}$/)
+    .optional(),
   capacity: z.number().int().min(1).max(100).optional(),
   zone: z.string().trim().min(2).max(100),
   startsAt: z.iso

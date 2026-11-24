@@ -21,6 +21,16 @@ import { enqueuePush } from "./push.js";
 import { config } from "./config.js";
 import { socialScope } from "./social.js";
 import { planAudienceVisibility } from "./plan-audience.js";
+import { communityAccess, communityPlanFilter } from "./community-service.js";
+import {
+  ensureCommunityEventGroup,
+  requestCommunityPlan,
+} from "./community-plans.js";
+import { Community } from "./community-models.js";
+import {
+  communityNotice,
+  announceCommunityPlan,
+} from "./community-notifications.js";
 
 async function privatePlansFor(userId: string) {
   const scope = await socialScope(userId);
@@ -116,6 +126,38 @@ export async function visibleActivity(
   id: unknown,
   includeOwnPast = false,
 ) {
+  const communityPlan = await Activity.findOne({
+    _id: objectId(id),
+    community: { $ne: null },
+  }).lean();
+  if (communityPlan) {
+    const owner = await User.exists({
+      _id: communityPlan.creator,
+      status: "active",
+      adminRole: null,
+    });
+    if (!owner) throw fail(404, "Plan unavailable.");
+    if (
+      String(communityPlan.creator) === userId &&
+      includeOwnPast &&
+      communityPlan.status !== "deleted"
+    )
+      return communityPlan;
+    await communityAccess(userId, String(communityPlan.community), false);
+    const participated =
+      includeOwnPast &&
+      !!(await ActivityInterest.exists({
+        activity: communityPlan._id,
+        user: userId,
+        status: { $in: ["accepted", "pending", "waitlisted"] },
+      }));
+    const filter = await communityPlanFilter(userId, participated);
+    const activity = await Activity.findOne({
+      $and: [filter, { _id: communityPlan._id }],
+    }).lean();
+    if (!activity) throw fail(404, "Plan unavailable.");
+    return activity;
+  }
   const scope = await activityScope(userId);
   const privateFilter = await privatePlansFor(userId);
   const activity = await Activity.findOne({
@@ -139,7 +181,7 @@ export async function visibleActivity(
   return activity;
 }
 
-async function serializePlans(
+export async function serializePlans(
   rows: Record<string, any>[],
   userId: string,
   detail = false,
@@ -251,6 +293,8 @@ async function serializePlans(
         schedule: a.schedule ?? null,
         type: a.type,
         activityType: a.activityType ?? "one_on_one",
+        communityId: a.community ? String(a.community) : null,
+        participationPolicy: a.participationPolicy ?? "approval",
         capacity,
         placesLeft,
         availability: placesLeft === 0 ? "full" : "open",
@@ -320,6 +364,10 @@ export async function acceptActivityInterest(
   const interest = await ActivityInterest.findById(objectId(interestId));
   if (!interest) throw fail(404, "Request unavailable.");
   const activity = await visibleActivity(ownerId, String(interest.activity));
+  if (activity.community) {
+    await communityAccess(ownerId, String(activity.community), false);
+    await communityAccess(String(interest.user), String(activity.community));
+  }
   if (String(activity.creator) !== ownerId)
     throw fail(404, "Request unavailable.");
   // Both sides must still be permitted to view and interact with each other.
@@ -327,17 +375,30 @@ export async function acceptActivityInterest(
   const me = await User.findById(ownerId).select("restrictions").lean();
   if (me?.restrictions?.messaging)
     throw fail(403, "Messaging is restricted. Contact support to appeal.");
-  if (interest.status === "declined")
+  if (["declined", "cancelled"].includes(interest.status))
     throw fail(409, "This request was declined.");
   const capacity =
     activity.activityType === "group" ? (activity.capacity ?? 100) : 1;
   const session = await mongoose.startSession();
   try {
     return await session.withTransaction(async () => {
+      if (activity.community) {
+        await communityAccess(
+          String(interest.user),
+          String(activity.community),
+          true,
+          session,
+        );
+        await Community.updateOne(
+          { _id: activity.community },
+          { $inc: { revision: 1 } },
+          { session },
+        );
+      }
       const current = await ActivityInterest.findById(interest._id).session(
         session,
       );
-      if (!current || current.status === "declined")
+      if (!current || ["declined", "cancelled"].includes(current.status))
         throw fail(409, "This request was declined.");
       const reserved = await Activity.findOneAndUpdate(
         {
@@ -363,19 +424,22 @@ export async function acceptActivityInterest(
         { new: true, session },
       );
       if (!reserved) throw fail(409, "Activity Full");
-      const conversation = await ensureMatch(
-        ownerId,
-        String(interest.user),
-        String(activity._id),
-        session,
-      );
-      if (!conversation) throw fail(404, "Conversation unavailable.");
+      const conversation = activity.community
+        ? undefined
+        : await ensureMatch(
+            ownerId,
+            String(interest.user),
+            String(activity._id),
+            session,
+          );
+      if (!conversation && !activity.community)
+        throw fail(404, "Conversation unavailable.");
       await ActivityInterest.updateOne(
         { _id: interest._id },
         {
           $set: {
             status: "accepted",
-            conversation,
+            ...(conversation ? { conversation } : {}),
             readAt: new Date(),
           },
         },
@@ -388,14 +452,26 @@ export async function acceptActivityInterest(
           ownerId,
           session,
         );
-      await enqueuePush(
-        {
-          key: `interest:${interest._id}:accepted`,
-          user: String(interest.user),
-          actor: ownerId,
-        },
-        session,
-      );
+      if (activity.community)
+        await ensureCommunityEventGroup(activity._id, ownerId, session);
+      if (activity.community)
+        await communityNotice(
+          activity.community,
+          String(interest.user),
+          ownerId,
+          `Your request for ${activity.title} was approved. Open the event chat to coordinate.`,
+          `plan-approved:${interest._id}`,
+          session,
+        );
+      if (!activity.community)
+        await enqueuePush(
+          {
+            key: `interest:${interest._id}:accepted`,
+            user: String(interest.user),
+            actor: ownerId,
+          },
+          session,
+        );
       return conversation;
     });
   } finally {
@@ -771,16 +847,47 @@ export function activitiesRouter() {
           "This category is not currently available for this plan.",
         );
       const live = liveActivityFilter();
-      const data = await Activity.findOneAndUpdate(
-        {
-          _id: activity._id,
-          creator: req.userId,
-          status: "active",
-          $or: live.$or,
-        },
-        { $set: { ownerState: state } },
-        { new: true, runValidators: true },
-      );
+      const update = async (session?: mongoose.ClientSession) => {
+        if (activity.community) {
+          const { community } = await communityAccess(
+            req.userId!,
+            String(activity.community),
+            true,
+            session,
+          );
+          await Community.updateOne(
+            { _id: community._id },
+            { $inc: { revision: 1 } },
+            { session },
+          );
+          const count = await Activity.countDocuments({
+            _id: { $ne: activity._id },
+            community: community._id,
+            creator: req.userId,
+            status: { $in: ["active", "paused"] },
+            ownerState: { $in: ["live", "paused"] },
+            startsAt: { $gt: new Date() },
+          }).session(session ?? null);
+          if (count >= community.maxActivePlans)
+            throw fail(
+              409,
+              "Close another community plan before reopening this one.",
+            );
+        }
+        return Activity.findOneAndUpdate(
+          {
+            _id: activity._id,
+            creator: req.userId,
+            status: "active",
+            $or: live.$or,
+          },
+          { $set: { ownerState: state } },
+          { new: true, runValidators: true, session },
+        );
+      };
+      const data = activity.community
+        ? await mongoose.connection.transaction(update)
+        : await update();
       if (!data)
         throw fail(
           409,
@@ -800,10 +907,23 @@ export function activitiesRouter() {
       { new: true, runValidators: true },
     );
     if (!data) throw fail(404, "Plan unavailable.");
+    if (activity.community && ["closed", "paused"].includes(state))
+      await announceCommunityPlan(
+        activity._id,
+        req.userId!,
+        `${activity.title} has been ${state === "closed" ? "cancelled" : "paused"} by the organiser.`,
+        `plan-state:${activity._id}:${state}:${data.updatedAt.getTime()}`,
+      );
     res.json({ data: { ownerState: data.ownerState } });
   });
   router.post("/:id/interests", async (req: AuthedRequest, res) => {
     const activity = await visibleActivity(req.userId!, req.params.id);
+    if (activity.community) {
+      res
+        .status(201)
+        .json({ data: await requestCommunityPlan(req.userId!, req.params.id) });
+      return;
+    }
     if (String(activity.creator) === req.userId)
       throw fail(404, "Plan not available.");
     const existing = await ActivityInterest.findOne({
@@ -868,11 +988,20 @@ export function activitiesRouter() {
         { $set: { status: "declined", readAt: new Date() } },
       );
       if (!interest) throw fail(409, "Request already handled.");
-      await enqueuePush({
-        key: `interest:${interest._id}:declined`,
-        user: String(interest.user),
-        actor: req.userId!,
-      });
+      if (activity.community)
+        await communityNotice(
+          activity.community,
+          String(interest.user),
+          req.userId!,
+          `Your request for ${activity.title} wasn't accepted this time.`,
+          `interest:${interest._id}:declined`,
+        );
+      else
+        await enqueuePush({
+          key: `interest:${interest._id}:declined`,
+          user: String(interest.user),
+          actor: req.userId!,
+        });
       res.status(204).end();
     },
   );

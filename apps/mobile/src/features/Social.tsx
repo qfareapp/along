@@ -57,6 +57,7 @@ import { colors as c } from "../theme";
 import { useAppLayout } from "../components/layout";
 import { timeAgo } from "./Likes";
 import { PeoplePlanCard } from "./PlanComponents";
+import { CommunityFab, CommunityPicker } from "./Communities";
 
 const themes = {
   teal: ["#174F54", "#326B69"],
@@ -113,6 +114,7 @@ function SocialHome() {
   const now = useClock();
   const insets = useSafeAreaInsets();
   const [composerOpen, setComposerOpen] = useState(false);
+  const [communitiesOpen, setCommunitiesOpen] = useState(false);
   const [feedScope, setFeedScope] = useState<"matches" | "discover">("matches");
   const [pendingScope, setPendingScope] = useState<
     "matches" | "discover" | null
@@ -238,6 +240,11 @@ function SocialHome() {
                 })}
               </View>
               <View style={[s.row, { gap: 6 }]}>
+                <IconButton
+                  icon="add-circle-outline"
+                  label="Add status"
+                  onPress={() => setComposerOpen(true)}
+                />
                 <View>
                   <IconButton
                     icon="notifications-outline"
@@ -492,30 +499,15 @@ function SocialHome() {
           },
         ]}
       >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Open What's on your mind"
-          accessibilityHint="Choose a photo, question or update to share"
-          accessibilityState={{ expanded: composerOpen }}
-          onPress={() => setComposerOpen(true)}
-          style={({ pressed }) => [
-            s.floatingComposer,
-            pressed && { opacity: 0.8 },
-          ]}
-        >
-          {completion.data?.profile.photos?.[0] ? (
-            <MemberPhoto
-              id={completion.data.profile.photos[0]}
-              style={s.floatingAvatar}
-            />
-          ) : (
-            <Ionicons name="person" size={30} color={c.ivory} />
-          )}
-          <View style={s.floatingPlus}>
-            <Ionicons name="add" size={20} color={c.white} />
-          </View>
-        </Pressable>
+        <CommunityFab
+          expanded={communitiesOpen}
+          onPress={() => setCommunitiesOpen(true)}
+        />
       </View>
+      <CommunityPicker
+        visible={communitiesOpen}
+        onClose={() => setCommunitiesOpen(false)}
+      />
       {pendingScope && (
         <Modal
           transparent
@@ -2459,21 +2451,6 @@ const s = StyleSheet.create({
     maxWidth: 720,
     alignSelf: "center",
     alignItems: "flex-end",
-  },
-  floatingComposer: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.teal,
-    borderWidth: 3,
-    borderColor: c.ivory,
-    shadowColor: c.tealDark,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 7,
   },
   floatingAvatar: { width: 58, height: 58, borderRadius: 29 },
   floatingPlus: {

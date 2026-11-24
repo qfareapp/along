@@ -71,10 +71,24 @@ const schema = z.object({
 type Values = z.infer<typeof schema>;
 export default function CreatePlan() {
   const completion = useCompletion();
-  const params = useLocalSearchParams<{ category?: string }>();
+  const params = useLocalSearchParams<{
+    category?: string;
+    communityId?: string;
+  }>();
+  const [communityRequestId] = useState(
+    () => `plan_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+  );
+  const [participationPolicy, setParticipationPolicy] = useState<
+    "approval" | "open"
+  >("approval");
+  const [similarPlans, setSimilarPlans] = useState<
+    { _id: string; title: string }[]
+  >([]);
+  const [similarKey, setSimilarKey] = useState("");
+  const [approvedSimilarKey, setApprovedSimilarKey] = useState("");
   const refreshPlans = useRefreshPlans();
   const [activityType, setActivityType] = useState<"one_on_one" | "group">(
-    "one_on_one",
+    params.communityId ? "group" : "one_on_one",
   );
   const [capacity, setCapacity] = useState("4");
   const [minAge, setMinAge] = useState("18"),
@@ -227,6 +241,23 @@ export default function CreatePlan() {
       return;
     }
     try {
+      if (params.communityId && !demoMode) {
+        const key = JSON.stringify([
+          value.title,
+          startsAt.toISOString(),
+          value.zone,
+        ]);
+        if (approvedSimilarKey !== key) {
+          const similar = await api<{ _id: string; title: string }[]>(
+            `/communities/${params.communityId}/plans/similar?title=${encodeURIComponent(value.title)}&startsAt=${startsAt.toISOString()}&zone=${encodeURIComponent(value.zone)}`,
+          );
+          if (similar.length) {
+            setSimilarPlans(similar);
+            setSimilarKey(key);
+            return;
+          }
+        }
+      }
       let id = `local-${new Date().getTime()}`;
       if (demoMode)
         state.addPlan({
@@ -262,13 +293,20 @@ export default function CreatePlan() {
             method: "POST",
             body: JSON.stringify({
               type,
+              ...(params.communityId
+                ? {
+                    communityId: params.communityId,
+                    clientId: communityRequestId,
+                    participationPolicy,
+                  }
+                : {}),
               title: value.title,
               description: value.description,
               category,
               zone: value.zone,
               startsAt: startsAt.toISOString(),
               budget: value.budget,
-              recurring: category === "commute",
+              recurring: !params.communityId && category === "commute",
               categoryDetails,
               audience: {
                 ...audience,
@@ -278,8 +316,8 @@ export default function CreatePlan() {
               },
               ...(endsAt ? { endsAt: endsAt.toISOString() } : {}),
               ...(flexibleSchedule ? { schedule } : {}),
-              activityType,
-              ...(activityType === "group"
+              activityType: params.communityId ? "group" : activityType,
+              ...(activityType === "group" || params.communityId
                 ? { capacity: Number(capacity) }
                 : {}),
             }),
@@ -353,6 +391,24 @@ export default function CreatePlan() {
   );
   return (
     <Screen key={step} width="reading">
+      {params.communityId && (
+        <View style={{ gap: 10, marginBottom: 14 }}>
+          <Text style={text.label}>Community group plan</Text>
+          <Text style={text.muted}>Who can join this plan?</Text>
+          <Button
+            variant={participationPolicy === "approval" ? "primary" : "outline"}
+            onPress={() => setParticipationPolicy("approval")}
+          >
+            Organiser approval
+          </Button>
+          <Button
+            variant={participationPolicy === "open" ? "primary" : "outline"}
+            onPress={() => setParticipationPolicy("open")}
+          >
+            Open RSVP · up to capacity
+          </Button>
+        </View>
+      )}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
@@ -361,6 +417,31 @@ export default function CreatePlan() {
           subtitle="Post what you need or want to do."
           back
         />
+        {!!similarPlans.length && (
+          <View style={{ gap: 10, marginBottom: 16 }}>
+            <Notice>
+              A similar plan already exists. Would you like to view it before
+              creating another?
+            </Notice>
+            {similarPlans.map((plan) => (
+              <Button
+                key={plan._id}
+                variant="outline"
+                onPress={() => router.push(`/activity?id=${plan._id}`)}
+              >
+                {plan.title}
+              </Button>
+            ))}
+            <Button
+              onPress={() => {
+                setApprovedSimilarKey(similarKey);
+                setSimilarPlans([]);
+              }}
+            >
+              Continue creating
+            </Button>
+          </View>
+        )}
         {reviewPending && (
           <Notice>
             Your plan has been submitted for moderation. It will appear in
@@ -641,7 +722,10 @@ export default function CreatePlan() {
                   key={kind}
                   accessibilityRole="button"
                   accessibilityState={{ selected: activityType === kind }}
-                  onPress={() => setActivityType(kind)}
+                  onPress={() => {
+                    if (!params.communityId || kind === "group")
+                      setActivityType(kind);
+                  }}
                   style={{
                     flex: 1,
                     padding: 15,

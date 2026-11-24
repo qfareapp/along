@@ -16,7 +16,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -32,6 +32,7 @@ import {
   IconButton,
   Notice,
   Screen,
+  SegmentedToggle,
   text,
   useKeyboardVisible,
 } from "../components/ui";
@@ -59,21 +60,70 @@ import { useMomentTray } from "../services/social";
 import { PlanGroupList } from "./PlanGroupChat";
 import { usePlanGroups } from "../services/planGroups";
 
+type ChatView = "direct" | "groups";
 export function LiveChatList() {
+  const params = useLocalSearchParams<{ view?: string }>();
+  const [view, setView] = useState<ChatView>(
+    params.view === "groups" ? "groups" : "direct",
+  );
+  // Follow a `?view=` deep link when it changes, without an effect.
+  const [linkedView, setLinkedView] = useState(params.view);
+  if (params.view !== linkedView) {
+    setLinkedView(params.view);
+    if (params.view === "groups" || params.view === "direct")
+      setView(params.view);
+  }
   const query = useConversations();
   const groups = usePlanGroups();
   const moments = useMomentTray();
   const rows = query.data ?? [];
   const fresh = rows.filter((r) => !r.lastMessage);
   const threads = rows.filter((r) => r.lastMessage);
+  const directUnread = rows.reduce((sum, r) => sum + (r.unread || 0), 0);
+  const groupUnread = (groups.data ?? []).reduce(
+    (sum, g) => sum + (g.unread || 0),
+    0,
+  );
   return (
-    <Screen>
+    <Screen
+      refreshing={query.isRefetching || groups.isRefetching}
+      onRefresh={() => {
+        void query.refetch();
+        void groups.refetch();
+      }}
+    >
       <Header
         title="Your conversations"
-        subtitle="A little hello goes a long way."
+        subtitle={
+          view === "direct"
+            ? "A little hello goes a long way."
+            : "Chats for the plans you're part of."
+        }
       />
-      <PlanGroupList />
-      {query.isPending && query.fetchStatus !== "idle" ? (
+      <View style={{ marginTop: 4, marginBottom: 18 }}>
+        <SegmentedToggle<ChatView>
+          label="Conversation type"
+          value={view}
+          onChange={setView}
+          options={[
+            {
+              value: "direct",
+              label: "Direct Chats",
+              icon: "chatbubble-ellipses-outline",
+              badge: directUnread,
+            },
+            {
+              value: "groups",
+              label: "Plan Groups",
+              icon: "people-outline",
+              badge: groupUnread,
+            },
+          ]}
+        />
+      </View>
+      {view === "groups" ? (
+        <PlanGroupList />
+      ) : query.isPending && query.fetchStatus !== "idle" ? (
         <ActivityIndicator color={c.teal} />
       ) : query.error ? (
         <Empty
@@ -83,11 +133,11 @@ export function LiveChatList() {
         >
           <Button onPress={() => void query.refetch()}>Try Again</Button>
         </Empty>
-      ) : !rows.length && !groups.data?.length ? (
+      ) : !rows.length ? (
         <Empty
           icon="chatbubbles-outline"
           title="Your next hello starts here"
-          description="Conversations open after a mutual match or an accepted plan request. Explore people and shared plans to make a connection."
+          description="Direct chats open after a mutual match or an accepted plan request. Explore people and shared plans to make a connection."
         >
           <Button onPress={() => router.push("/(tabs)")}>Explore People</Button>
         </Empty>
@@ -147,7 +197,7 @@ export function LiveChatList() {
               </ScrollView>
             </>
           )}
-          {!!threads.length && (
+          {!!threads.length && !!fresh.length && (
             <Text style={[text.label, { marginTop: 24, marginBottom: 6 }]}>
               Messages
             </Text>
@@ -404,7 +454,11 @@ export function LiveConversation({ id }: { id?: string }) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`View ${member.name}'s profile`}
-            onPress={() => router.push(`${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`)}
+            onPress={() =>
+              router.push(
+                `${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`,
+              )
+            }
             style={[s.row, { flex: 1, gap: 10 }]}
           >
             <MemberPhoto
@@ -448,12 +502,20 @@ export function LiveConversation({ id }: { id?: string }) {
             <MenuRow
               icon="person-circle-outline"
               label="View profile"
-              onPress={() => router.push(`${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`)}
+              onPress={() =>
+                router.push(
+                  `${data.airportConnection ? "/airport-person" : "/person"}?id=${member.id}`,
+                )
+              }
             />
             <MenuRow
               icon="shield-checkmark-outline"
               label="Safety & reporting"
-              onPress={() => router.push(`/safety?target=${member.id}&conversation=${data.id}`)}
+              onPress={() =>
+                router.push(
+                  `/safety?target=${member.id}&conversation=${data.id}`,
+                )
+              }
             />
             {confirmUnmatch ? (
               <View style={{ padding: 14, gap: 10 }}>
@@ -690,7 +752,22 @@ export function LiveConversation({ id }: { id?: string }) {
                       {formatChatTime(msg.createdAt)}
                       {msg.id === lastOwn?.id && msg.readAt ? " · Seen" : ""}
                     </Text>
-                    {!msg.own && <Pressable accessibilityRole="button" accessibilityLabel="Report this message" onPress={() => router.push(`/safety?target=${member.id}&conversation=${data.id}&message=${msg.id}`)} style={{ paddingVertical: 8 }}><Text style={[text.muted, { fontSize: 11 }]}>Report message</Text></Pressable>}
+                    {!msg.own && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Report this message"
+                        onPress={() =>
+                          router.push(
+                            `/safety?target=${member.id}&conversation=${data.id}&message=${msg.id}`,
+                          )
+                        }
+                        style={{ paddingVertical: 8 }}
+                      >
+                        <Text style={[text.muted, { fontSize: 11 }]}>
+                          Report message
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 </View>
               ))}
@@ -865,9 +942,11 @@ export function LiveConversation({ id }: { id?: string }) {
         ) : (
           <View style={{ padding: 15, paddingBottom: 15 + bottom }}>
             <Notice>
-              {data.airportPaused ? "Your airport visit together ended. Both choose Stay connected to keep chatting." : data.waitingForOwner
-                ? "The activity owner will send the first message. You can reply once they say hello."
-                : "Messaging is restricted on your account. Contact support to appeal."}
+              {data.airportPaused
+                ? "Your airport visit together ended. Both choose Stay connected to keep chatting."
+                : data.waitingForOwner
+                  ? "The activity owner will send the first message. You can reply once they say hello."
+                  : "Messaging is restricted on your account. Contact support to appeal."}
             </Notice>
           </View>
         )}

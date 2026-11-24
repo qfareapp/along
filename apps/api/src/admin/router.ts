@@ -46,6 +46,7 @@ import { strongPassword } from "./provision.js";
 import { socialAdminRouter } from "./social.js";
 import { playAdminRouter } from "./play.js";
 import { airportAdminRouter } from "./airports.js";
+import { communityAdminRouter } from "./communities.js";
 import { config } from "../config.js";
 import {
   ensureEnvironmentAdmin,
@@ -311,6 +312,7 @@ export function adminRouter() {
   router.use("/social", socialAdminRouter());
   router.use("/games", playAdminRouter());
   router.use("/airports", airportAdminRouter());
+  router.use("/communities", communityAdminRouter());
   router.get("/auth/me", (req: AdminRequest, res) =>
     res.json({
       data: {
@@ -993,7 +995,12 @@ export function adminRouter() {
             {
               status: body.status,
               severity: body.severity,
-              priority: body.severity === "critical" ? 100 : body.severity === "high" ? 50 : 0,
+              priority:
+                body.severity === "critical"
+                  ? 100
+                  : body.severity === "high"
+                    ? 50
+                    : 0,
               $push: {
                 notes: { text: body.reason, by: req.admin!.id, at: new Date() },
               },
@@ -1003,15 +1010,30 @@ export function adminRouter() {
           );
           if (!report) throw fail(404, "Report not found.");
           if (body.removeContent) {
-            if (!report.message && !report.groupMessage) throw fail(400, "This report has no removable message. Use profile or Social moderation controls.");
+            if (!report.message && !report.groupMessage)
+              throw fail(
+                400,
+                "This report has no removable message. Use profile or Social moderation controls.",
+              );
             if (report.message) {
-              const message = await Message.findById(report.message).select("+attachment.asset").session(session);
-              if (message?.attachment?.asset) await queueAsset(message.attachment.asset, session);
+              const message = await Message.findById(report.message)
+                .select("+attachment.asset")
+                .session(session);
+              if (message?.attachment?.asset)
+                await queueAsset(message.attachment.asset, session);
               await Message.deleteOne({ _id: report.message }, { session });
             }
             if (report.groupMessage) {
-              await PlanGroupMessage.deleteOne({ _id: report.groupMessage }, { session });
-              if (report.group) await PlanGroup.updateOne({ _id: report.group }, { $inc: { contentRevision: 1 } }, { session });
+              await PlanGroupMessage.deleteOne(
+                { _id: report.groupMessage },
+                { session },
+              );
+              if (report.group)
+                await PlanGroup.updateOne(
+                  { _id: report.group },
+                  { $inc: { contentRevision: 1 } },
+                  { session },
+                );
             }
           }
           return report;

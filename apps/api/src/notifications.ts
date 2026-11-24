@@ -8,7 +8,9 @@ import { acceptActivityInterest, activityScope } from "./activities.js";
 // Interest records are the durable notifications, including likes made before this feature.
 async function visibleInterests(userId: string) {
   const scope = await activityScope(userId);
-  const activities = await Activity.find(scope.filter)
+  // Community participation is handled by community notices and event chats,
+  // never by the legacy one-to-one conversation acceptance action.
+  const activities = await Activity.find({ ...scope.filter, community: null })
     .select("title creator")
     .lean();
   const users = await User.find({ _id: { $in: scope.filter.creator.$in } })

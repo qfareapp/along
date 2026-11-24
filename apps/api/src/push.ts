@@ -37,7 +37,7 @@ const jobSchema = new Schema(
     device: ref("PushDevice"),
     kind: {
       type: String,
-      enum: ["message", "group", "notice"],
+      enum: ["message", "group", "notice", "community", "community_notice"],
       required: true,
     },
     target: Schema.Types.ObjectId,
@@ -65,7 +65,7 @@ export async function enqueuePush(
     key: string;
     user: string;
     actor: string;
-    kind?: "message" | "group" | "notice";
+    kind?: "message" | "group" | "notice" | "community" | "community_notice";
     target?: string;
     message?: string;
   },
@@ -178,6 +178,26 @@ async function payloadFor(job: Job) {
     return null;
   const recipientId = String(job.user);
   const base = { to: device.token, sound: "default", ttl: 86400 };
+  if (job.kind === "community_notice") {
+    const { communityAccess } = await import("./community-service.js");
+    let access;
+    try {
+      access = await communityAccess(recipientId, String(job.target));
+    } catch (error) {
+      if ([403, 404].includes((error as { status?: number }).status ?? 0))
+        return null;
+      throw error;
+    }
+    if (access.member?.muted) return null;
+    return {
+      ...base,
+      title: "Along",
+      body: "1 new notification from Along",
+      channelId: "updates",
+      priority: "default",
+      data: { kind: "notice", recipientId, communityId: String(job.target) },
+    };
+  }
   if (job.kind === "notice")
     return {
       ...base,
@@ -218,6 +238,39 @@ async function payloadFor(job: Job) {
       },
     };
   }
+  if (job.kind === "community") {
+    const { communityAccess } = await import("./community-service.js");
+    const { CommunityMessage } = await import("./community-models.js");
+    let access;
+    try {
+      access = await communityAccess(recipientId, String(job.target));
+    } catch (error) {
+      if ([403, 404].includes((error as { status?: number }).status ?? 0))
+        return null;
+      throw error;
+    }
+    if (access.member?.muted) return null;
+    const message = await CommunityMessage.findOne({
+      _id: job.message,
+      community: job.target,
+      sender: job.actor,
+      deletedAt: null,
+    });
+    if (
+      !message ||
+      message.sequence <=
+        Math.max(access.member!.joinedAfter, access.member!.lastReadSequence)
+    )
+      return null;
+    return {
+      ...base,
+      title: `New message from ${actor.name}`.slice(0, 100),
+      body: "Open Along to read it.",
+      channelId: "messages",
+      priority: "high",
+      data: { kind: "community", recipientId, communityId: String(job.target) },
+    };
+  }
   const { authorisePlanGroup } = await import("./plan-group-service.js");
   const { PlanGroupMessage } = await import("./plan-group-models.js");
   let access;
@@ -235,6 +288,8 @@ async function payloadFor(job: Job) {
   });
   if (
     !message ||
+    access.member.muted ||
+    message.deletedAt ||
     message.sequence <=
       Math.max(access.member.joinedAfter, access.member.lastReadSequence)
   )
