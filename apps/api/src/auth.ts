@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { config } from "./config.js";
@@ -24,12 +25,12 @@ export function requestMember(req: Request) {
 }
 export const digest = (token: string) =>
   crypto.createHash("sha256").update(token).digest("hex");
-export async function tokens(userId: string) {
+export async function tokens(userId: string, transaction?: mongoose.ClientSession) {
   const owner = await User.findOne({
     _id: userId,
     status: "active",
     adminRole: null,
-  });
+  }).session(transaction ?? null);
   if (!owner)
     throw Object.assign(new Error("Account unavailable."), { status: 401 });
   if (!config.JWT_SECRET)
@@ -47,11 +48,11 @@ export async function tokens(userId: string) {
     },
   );
   const refreshToken = crypto.randomBytes(48).toString("base64url");
-  await RefreshSession.create({
+  await RefreshSession.create([{
     user: userId,
     tokenHash: digest(refreshToken),
     expiresAt: new Date(Date.now() + 30 * 86400000),
-  });
+  }], { session: transaction });
   return { accessToken, refreshToken, expiresIn: 900 };
 }
 export async function authenticate(

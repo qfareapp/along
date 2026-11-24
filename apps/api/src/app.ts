@@ -42,6 +42,9 @@ import { airportRouter } from "./airports.js";
 import { eraseAccount } from "./account-deletion.js";
 import { safetyRouter } from "./safety.js";
 import { publicPoliciesRouter } from "./public-policies.js";
+import { passwordRecoveryRouter } from "./password-recovery.js";
+import { emailLoginRouter } from "./email-login.js";
+import { EmailLoginChallenge } from "./email-login-models.js";
 import { policyVersion } from "../../../packages/policies/index.js";
 import { communitiesRouter } from "./communities.js";
 import { communityAccess } from "./community-service.js";
@@ -115,6 +118,10 @@ export function createApp() {
   });
   const authLimit = rateLimit({ windowMs: 15 * 60000, limit: 20 });
   app.use("/api/v1/admin", adminRouter());
+  app.use("/api/v1/auth/password", passwordRecoveryRouter());
+  app.use("/api/v1/auth/otp", async (_req, _res, next) => {
+    try { await EmailLoginChallenge.init(); next(); } catch (error) { next(error); }
+  }, emailLoginRouter());
   app.use("/api/v1", safetyRouter());
   app.use("/api/v1/discovery", discoveryRouter());
   app.use("/api/v1/airports", airportRouter());

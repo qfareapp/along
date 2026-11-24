@@ -39,6 +39,10 @@ export const userSchema = new Schema(
     contactCodeHash: { type: String, select: false },
     contactCodeExpiresAt: { type: Date, select: false },
     contactCodeAttempts: { type: Number, default: 0, select: false },
+    passwordResetHash: { type: String, select: false },
+    passwordResetExpiresAt: { type: Date, select: false },
+    passwordResetRequestedAt: { type: Date, select: false },
+    passwordResetAttempts: { type: Number, select: false },
     identityVerified: { type: Boolean, default: false },
     adminRole: { type: String, default: null },
     restrictions: {

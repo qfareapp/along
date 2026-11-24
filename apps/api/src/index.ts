@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { EmailLoginChallenge } from "./email-login-models.js";
 import { createApp } from "./app.js";
 import { config } from "./config.js";
 import { initializeCategories } from "./categories.js";
@@ -50,6 +51,7 @@ async function connectDatabase() {
       }
       console.log("MongoDB connected");
       await Promise.all([
+        EmailLoginChallenge.init(),
         PushDevice.init(),
         PushJob.init(),
         Airport.init(),

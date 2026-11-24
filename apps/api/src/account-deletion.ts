@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EmailLoginChallenge } from "./email-login-models.js";
 import mongoose, { Schema } from "mongoose";
 import {
   User,
@@ -114,6 +115,10 @@ export async function eraseAccount(userId: string, now = new Date()) {
           contactCodeHash: 1,
           contactCodeExpiresAt: 1,
           contactCodeAttempts: 1,
+          passwordResetHash: 1,
+          passwordResetExpiresAt: 1,
+          passwordResetRequestedAt: 1,
+          passwordResetAttempts: 1,
           mfaSecretEncrypted: 1,
           recoveryHashes: 1,
         },
@@ -254,6 +259,7 @@ export async function eraseAccount(userId: string, now = new Date()) {
       { $or: [{ recipient: user._id }, { actor: user._id }] },
       { session },
     );
+    await EmailLoginChallenge.deleteMany({ user: user._id }, { session });
     await RefreshSession.deleteMany({ user: user._id }, { session });
     await PushDevice.deleteMany({ user: user._id }, { session });
     await PushJob.deleteMany(
